@@ -1,0 +1,9 @@
+/home/evalzano/spmv-scpa/build/CMakeFiles/mmio_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/utils_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/vec_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/log_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/csr_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/hll_mod.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/spmv_scpa.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/edit_cache.dir
+/home/evalzano/spmv-scpa/build/CMakeFiles/rebuild_cache.dir

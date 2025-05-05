@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -march=native -O3 -DNDEBUG CMakeFiles/spmv_scpa.dir/src/main.c.o -o spmv_scpa  liblog_mod.a libcsr_mod.a libhll_mod.a libvec_mod.a libutils_mod.a libmmio_mod.a 

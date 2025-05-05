@@ -1,0 +1,10 @@
+{
+      "files.associations": {
+            "*.md": "markdown",
+            "getopt.h": "c",
+            "json.h": "c",
+            "csr.h": "c",
+            "hll.h": "c",
+            "utils.h": "c"
+      }
+}

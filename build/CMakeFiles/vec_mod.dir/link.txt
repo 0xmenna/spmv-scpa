@@ -1,0 +1,2 @@
+/usr/bin/ar qc libvec_mod.a CMakeFiles/vec_mod.dir/src/vector.c.o
+/usr/bin/ranlib libvec_mod.a

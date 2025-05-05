@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhll_mod.a CMakeFiles/hll_mod.dir/src/hll.c.o
+/usr/bin/ranlib libhll_mod.a
