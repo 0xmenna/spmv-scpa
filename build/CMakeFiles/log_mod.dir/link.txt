@@ -1,2 +1,0 @@
-/usr/bin/ar qc liblog_mod.a CMakeFiles/log_mod.dir/src/logger.c.o
-/usr/bin/ranlib liblog_mod.a

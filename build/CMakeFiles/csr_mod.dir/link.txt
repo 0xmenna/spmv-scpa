@@ -1,2 +1,0 @@
-/usr/bin/ar qc libcsr_mod.a CMakeFiles/csr_mod.dir/src/csr.c.o
-/usr/bin/ranlib libcsr_mod.a

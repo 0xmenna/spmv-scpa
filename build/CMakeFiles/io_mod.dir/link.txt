@@ -1,2 +1,0 @@
-/usr/bin/ar qc libio_mod.a CMakeFiles/io_mod.dir/src/io.c.o
-/usr/bin/ranlib libio_mod.a
