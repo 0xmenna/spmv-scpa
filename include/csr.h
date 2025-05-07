@@ -3,41 +3,36 @@
 
 #include "utils.h"
 
-#define MAX_NAME 32
-
-typedef struct {
-      int col;
-      double val;
-} Entry;
+#define MAX_NAME 64
 
 /** Compressed Sparse Row matrix */
-typedef struct {
+typedef struct sparse_matrix_csr {
       char name[MAX_NAME];
-      int rows;
-      int cols;
-      int nnz;
-      int *row_off;
-      Entry *entries;
-} SparseCSR;
+      int M, N, NZ;
+      int *IRP;
+      int *JA;
+      double *AS;
+} sparse_csr;
 
-static inline void init_csr(SparseCSR *A, const char *name, int rows, int cols,
-                            int nnz, int *row_off, Entry *entries) {
+static inline void init_csr(sparse_csr *A, const char *name, int M, int N,
+                            int NZ, int *IRP, int *JA, double *AS) {
       snprintf(A->name, sizeof(A->name), "%s", name);
-      A->rows = rows;
-      A->cols = cols;
-      A->nnz = nnz;
-      A->row_off = row_off;
-      A->entries = entries;
+      A->M = M;
+      A->N = N;
+      A->NZ = NZ;
+      A->IRP = IRP;
+      A->JA = JA;
+      A->AS = AS;
 }
 
 /**
  * Loads a sparse matrix in CSR format from a Matrix Market file.
  */
-SparseCSR *io_load_csr(const char *path);
+sparse_csr *io_load_csr(const char *path);
 
 /** Free a SparseCSR */
-void csr_free(SparseCSR *A);
+void csr_free(sparse_csr *A);
 
-Bench bench_csr_serial(const SparseCSR *A);
+int bench_csr_serial(const sparse_csr *A, bench *out);
 
 #endif /* SPARSE_CSR_H */

@@ -20,7 +20,7 @@ int logger_init(const char *log_path) {
       }
       // CSV header
       fprintf(log, "matrix,format,benchmark,rows,cols,nnz,"
-                   "duration,gflops\n");
+                   "duration_ms,gflops\n");
       fflush(log);
       return 0;
 }
@@ -33,7 +33,7 @@ void logger_close(void) {
       }
 }
 
-void log_csr_serial_benchmark(const SparseCSR *A, Bench res) {
+void log_csr_serial_benchmark(const sparse_csr *A, bench res) {
       if (!log) {
             LOG_ERR("Log file not initialized");
             return;
@@ -42,17 +42,17 @@ void log_csr_serial_benchmark(const SparseCSR *A, Bench res) {
       fprintf(log,
               "%s,CSR,serial,%d,%d,%d,"
               "%f,%f\n",
-              A->name, A->rows, A->cols, A->nnz, res.duration, res.gflops);
+              A->name, A->M, A->N, A->NZ, res.duration_ms, res.gflops);
       fflush(log);
 }
 
-void log_hll_serial_benchmark(const BlockELLPACK *H, Bench res) {
+void log_hll_serial_benchmark(const BlockELLPACK *H, bench res) {
       if (!log) {
             LOG_ERR("Log file not initialized");
             return;
       }
       // HLL has num_blocks and block_size
       fprintf(log, "%s,HLL,serial,%d,%d,%d,%f,%f\n", H->name, H->rows, H->cols,
-              H->nnz, res.duration, res.gflops);
+              H->nnz, res.duration_ms, res.gflops);
       fflush(log);
 }

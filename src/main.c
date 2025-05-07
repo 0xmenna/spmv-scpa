@@ -1,4 +1,4 @@
-//main.c
+// main.c
 
 #include <libgen.h>
 #include <stdio.h>
@@ -12,6 +12,8 @@
 #include "../include/utils.h"
 
 int main(int argc, char **argv) {
+      int ret;
+
       if (argc != 3) {
             log_prog_usage(argv[0]);
             return EXIT_FAILURE;
@@ -26,7 +28,7 @@ int main(int argc, char **argv) {
       }
 
       // Load the CSR matrix
-      SparseCSR *A = io_load_csr(matrix_path);
+      sparse_csr *A = io_load_csr(matrix_path);
       if (!A) {
             LOG_ERR("Failed to load matrix: %s (err %d)", matrix_path,
                     PTR_ERR(A));
@@ -34,20 +36,26 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
       }
 
-      Bench res;
+      bench res;
 
       // CSR serial benchmark
-      res = bench_csr_serial(A);
+      ret = bench_csr_serial(A, &res);
+      if (ret) {
+            LOG_ERR("Failed to run CSR benchmark (err %d)", ret);
+            csr_free(A);
+            logger_close();
+            return EXIT_FAILURE;
+      }
       log_csr_serial_benchmark(A, res);
 
       // HLL serial benchmark
-      BlockELLPACK *H = csr_to_hll(A);
-      res = bench_hll_serial(H);
-      log_hll_serial_benchmark(H, res);
+      // BlockELLPACK *H = csr_to_hll(A);
+      // res = bench_hll_serial(H);
+      // log_hll_serial_benchmark(H, res);
 
       // Cleanup
       csr_free(A);
-      hll_free(H);
+      // hll_free(H);
       logger_close();
 
       return EXIT_SUCCESS;

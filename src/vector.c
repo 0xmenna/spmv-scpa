@@ -5,36 +5,26 @@
 #include <string.h>
 
 #include "../include/err.h"
+#include "../include/utils.h"
 #include "../include/vector.h"
 
-VecD *vec_create(size_t n) {
-      VecD *v = malloc(sizeof *v);
-      if (!v)
-            goto failure;
+vec vec_create(size_t n) {
+      vec v;
 
-      v->data = malloc(n * sizeof *v->data);
-      if (!v->data) {
-            goto failure;
-      }
-      v->len = n;
+      // Be sure the caller checks for memory allocation errors
+      v.data = aligned_malloc(n * sizeof *v.data);
+      v.len = n;
 
       return v;
-
-failure:
-      if (v) {
-            free(v);
-      }
-      return ERR_PTR(-ENOMEM);
 }
 
-void vec_free(VecD *v) {
+void vec_put(vec *v) {
       if (!v)
             return;
       free(v->data);
-      free(v);
 }
 
-void vec_fill(VecD *v, double value) {
+void vec_fill(vec *v, double value) {
       if (!v || !v->data)
             return;
       for (size_t i = 0; i < v->len; i++)

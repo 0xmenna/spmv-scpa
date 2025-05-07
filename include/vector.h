@@ -5,15 +5,14 @@
 
 /** Simple dynamically‐sized vector of doubles */
 typedef struct {
-      size_t len; 
+      size_t len;
       double *data;
-} VecD;
+} vec;
 
+vec vec_create(size_t n);
 
-VecD *vec_create(size_t n);
+void vec_put(vec *v);
 
-void vec_free(VecD *v);
-
-void vec_fill(VecD *v, double value);
+void vec_fill(vec *v, double value);
 
 #endif /* VECTOR_H */

@@ -1,6 +1,7 @@
 // hll.c
 
 #include <stdlib.h>
+#include <errno.h>
 
 #include "../include/csr.h"
 #include "../include/err.h"
@@ -8,12 +9,12 @@
 #include "../include/vector.h"
 
 /**
- * Convert a CSR matrix into BlockELLPACK with given block_size.
+ * Convert a CSR matrix into BlockELLPACK with given HACK_SIZE.
  * @return NULL on error.
  */
-BlockELLPACK *csr_to_hll(const SparseCSR *A) {
-      int M = A->rows;
-      int blocks = (M + BLOCK_SIZE - 1) / BLOCK_SIZE;
+BlockELLPACK *csr_to_hll(const sparse_csr *A) {
+      int M = A->M;
+      int blocks = (M + HACK_SIZE - 1) / HACK_SIZE;
 
       // 1) Count nonzeros per row and total nnz
       int *nnz_per = malloc(M * sizeof(int));
@@ -27,7 +28,7 @@ BlockELLPACK *csr_to_hll(const SparseCSR *A) {
             return NULL;
       }
 
-      init_hll(H, A->name, A->nnz, A->rows, A->cols, blocks);
+      init_hll(H, A->name, A->NZ, A->M, A->N, blocks);
 
       H->blocks = calloc(blocks, sizeof(*H->blocks));
       if (!H->blocks) {
@@ -38,8 +39,8 @@ BlockELLPACK *csr_to_hll(const SparseCSR *A) {
 
       // 3) For each block, compute max per row and populate
       for (int b = 0; b < blocks; b++) {
-            int r0 = b * BLOCK_SIZE;
-            int r1 = (r0 + BLOCK_SIZE < M ? r0 + BLOCK_SIZE : M);
+            int r0 = b * HACK_SIZE;
+            int r1 = (r0 + HACK_SIZE < M ? r0 + HACK_SIZE : M);
             int br = r1 - r0;
 
             // find maximum nnz in this block
@@ -49,7 +50,7 @@ BlockELLPACK *csr_to_hll(const SparseCSR *A) {
                         maxr = nnz_per[i];
             }
 
-            ELLBlock *blk = &H->blocks[b];
+            ellpack_block *blk = &H->blocks[b];
             blk->block_rows = br;
             blk->max_per_row = maxr;
 
@@ -77,12 +78,12 @@ BlockELLPACK *csr_to_hll(const SparseCSR *A) {
             // fill from CSR
             for (int i = r0; i < r1; i++) {
                   int off = (i - r0) * maxr;
-                  int start = A->row_off[i];
-                  int end = A->row_off[i + 1];
+                  int start = A->IRP[i];
+                  int end = A->IRP[i + 1];
                   int p = 0;
                   for (int k = start; k < end; k++, p++) {
-                        blk->col_idx[off + p] = A->entries[k].col;
-                        blk->block_vals[off + p] = A->entries[k].val;
+                        blk->col_idx[off + p] = A->JA[k];
+                        blk->block_vals[off + p] = A->AS[k];
                   }
             }
       }
@@ -105,10 +106,10 @@ void hll_free(BlockELLPACK *H) {
 static void inline hll_spmv_serial(const BlockELLPACK *H, const double *x,
                                    double *y) {
       for (int b = 0; b < H->num_blocks; b++) {
-            const ELLBlock *blk = &H->blocks[b];
+            const ellpack_block *blk = &H->blocks[b];
             int br = blk->block_rows;
             int mz = blk->max_per_row;
-            int base = b * BLOCK_SIZE;
+            int base = b * HACK_SIZE;
 
             for (int i = 0; i < br; i++) {
                   double sum = 0.0;
@@ -125,20 +126,28 @@ static void inline hll_spmv_serial(const BlockELLPACK *H, const double *x,
 }
 
 // Run HLL SpMV serial benchmark
-Bench bench_hll_serial(const BlockELLPACK *H) {
-      VecD *x = vec_create(H->cols);
-      VecD *y = vec_create(H->rows);
-      vec_fill(x, 1.0);
+int bench_hll_serial(const BlockELLPACK *H, bench *out) {
+      vec x = vec_create(H->cols);
+      if (!x.data)
+            return -ENOMEM;
 
+      vec_fill(&x, 1.0);
+
+      vec y = vec_create(H->rows);
+      if (!y.data) {
+            vec_put(&x);
+            return -ENOMEM;
+      }
+      
       double start = now();
-      hll_spmv_serial(H, x->data, y->data);
+      hll_spmv_serial(H, x.data, y.data);
       double end = now();
 
-      Bench result = {.duration = end - start,
-                      .gflops = compute_gflops(end - start, H->nnz)};
+      vec_put(&x);
+      vec_put(&y);
 
-      vec_free(x);
-      vec_free(y);
+      out->duration_ms = end - start;
+      out->gflops = compute_gflops(end - start, H->nnz);
 
-      return result;
+      return 0;
 }

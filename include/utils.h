@@ -9,9 +9,9 @@
 #define MAX_PATH 256
 
 typedef struct benchmark_result {
-      double duration; // in seconds
+      double duration_ms;
       double gflops;
-} Bench;
+} bench;
 
 #define LOG_WARN(fmt, ...)                                                     \
       do {                                                                     \
@@ -27,8 +27,13 @@ typedef struct benchmark_result {
 
 void log_prog_usage(const char *prog);
 
-static inline double now() { return (double)clock() / CLOCKS_PER_SEC; }
+// Get the current time in milliseconds
+inline double now(void) { return (double)clock() * 1e3 / CLOCKS_PER_SEC; }
 
-double compute_gflops(double duration, int nnz);
+inline double compute_gflops(double duration, int nnz) {
+      return (2.0 * nnz) / (duration * 1e6);
+}
+
+void *aligned_malloc(size_t size);
 
 #endif

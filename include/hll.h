@@ -5,7 +5,7 @@
 #include "utils.h"
 #include <stdlib.h>
 
-#define BLOCK_SIZE 32
+#define HACK_SIZE 32
 
 /** Blocked-ELLPACK (“HLL”) block */
 typedef struct {
@@ -13,7 +13,7 @@ typedef struct {
       int max_per_row;
       int *col_idx;
       double *block_vals;
-} ELLBlock;
+} ellpack_block;
 
 /** Full Blocked-ELLPACK matrix */
 typedef struct {
@@ -21,7 +21,7 @@ typedef struct {
       int nnz;
       int rows, cols;
       int num_blocks;
-      ELLBlock *blocks;
+      ellpack_block *blocks;
 } BlockELLPACK;
 
 static inline void init_hll(BlockELLPACK *H, const char *name, int nnz,
@@ -35,14 +35,14 @@ static inline void init_hll(BlockELLPACK *H, const char *name, int nnz,
 }
 
 /**
- * Convert a CSR matrix into BlockELLPACK with given block_size.
+ * Convert a CSR matrix into BlockELLPACK.
  * @return NULL on error.
  */
-BlockELLPACK *csr_to_hll(const SparseCSR *A);
+BlockELLPACK *csr_to_hll(const sparse_csr *A);
 
 /** Free a BlockELLPACK */
 void hll_free(BlockELLPACK *H);
 
-Bench bench_hll_serial(const BlockELLPACK *H);
+int bench_hll_serial(const BlockELLPACK *H, bench *out);
 
 #endif /* SPARSE_HLL_H */

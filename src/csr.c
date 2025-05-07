@@ -25,62 +25,64 @@ void extract_matrix_name(const char *path, char *name_out) {
       memcpy(name_out, base, copy_len);
       name_out[copy_len] = '\0';
 }
-
-SparseCSR *io_load_csr(const char *path) {
+sparse_csr *io_load_csr(const char *path) {
       char m_name[MAX_NAME];
       FILE *f = NULL;
+      int *row_counts = NULL, *IRP = NULL, *JA = NULL;
+      double *AS = NULL;
+      sparse_csr *A = NULL;
+      MM_typecode tt;
+      int M, N, nz0;
+      long total_nnz = 0;
+      int is_sym, is_pat;
+      int ret_errno = 0;
 
       extract_matrix_name(path, m_name);
-      f = fopen(path, "r");
-      if (!f) {
-            return ERR_PTR(-errno);
-      }
 
-      MM_typecode tt;
+      if (!(f = fopen(path, "r")))
+            return ERR_PTR(-errno);
+
       if (mm_read_banner(f, &tt) || !mm_is_matrix(tt) || !mm_is_sparse(tt) ||
           !(mm_is_real(tt) || mm_is_pattern(tt))) {
-            fclose(f);
-            return ERR_PTR(-EINVAL);
+            ret_errno = -EINVAL;
+            goto cleanup;
       }
 
-      int M, N, nz0;
       if (mm_read_mtx_crd_size(f, &M, &N, &nz0)) {
-            fclose(f);
-            return ERR_PTR(-EINVAL);
+            ret_errno = -EINVAL;
+            goto cleanup;
       }
-      const int is_sym = mm_is_symmetric(tt);
-      const int is_pat = mm_is_pattern(tt);
+      is_sym = mm_is_symmetric(tt);
+      is_pat = mm_is_pattern(tt);
 
       // First pass: count entries per row
       long header_pos = ftell(f);
-      int *row_counts = calloc((size_t)M, sizeof(int));
-      if (!row_counts) {
-            fclose(f);
-            return ERR_PTR(-ENOMEM);
+      if (!(row_counts = calloc((size_t)M, sizeof *row_counts))) {
+            ret_errno = -ENOMEM;
+            goto cleanup;
       }
 
-      int i, j;
-      double v;
-      long total_nnz = 0;
-      for (int e = 0; e < nz0; ++e) {
+      for (int e = 0, i, j; e < nz0; ++e) {
+            double v;
             if (is_pat) {
                   if (fscanf(f, "%d %d", &i, &j) != 2) {
-                        errno = EIO;
-                        goto failure;
+                        ret_errno = -EIO;
+                        goto cleanup;
                   }
                   v = 1.0;
             } else {
                   if (fscanf(f, "%d %d %lf", &i, &j, &v) != 3) {
-                        errno = EIO;
-                        goto failure;
+                        ret_errno = -EIO;
+                        goto cleanup;
                   }
             }
             --i;
             --j;
             if (i < 0 || i >= M || j < 0 || j >= N) {
-                  errno = ERANGE;
-                  goto failure;
+                  ret_errno = -ERANGE;
+                  goto cleanup;
             }
+
             row_counts[i]++;
             total_nnz++;
             if (is_sym && i != j) {
@@ -89,88 +91,97 @@ SparseCSR *io_load_csr(const char *path) {
             }
       }
 
-      // Allocate aligned row offsets
-      int *row_off;
-      if (posix_memalign((void **)&row_off, 64,
-                         (size_t)(M + 1) * sizeof(int))) {
-            errno = ENOMEM;
-            goto failure;
+      // Build IRP
+      IRP = aligned_malloc((size_t)(M + 1) * sizeof(int));
+      if (!IRP) {
+            ret_errno = -ENOMEM;
+            goto cleanup;
       }
-      row_off[0] = 0;
-      for (int r = 0; r < M; ++r) {
-            row_off[r + 1] = row_off[r] + row_counts[r];
+      IRP[0] = 0;
+      for (int r = 0; r < M; ++r)
+            IRP[r + 1] = IRP[r] + row_counts[r];
+
+      // Build JA and AS
+      JA = aligned_malloc((size_t)total_nnz * sizeof(int));
+      AS = aligned_malloc((size_t)total_nnz * sizeof(double));
+      if (!JA || !AS) {
+            ret_errno = -ENOMEM;
+            goto cleanup;
       }
 
-      // Allocate aligned interleaved entries
-      Entry *entries;
-      if (posix_memalign((void **)&entries, 64,
-                         (size_t)total_nnz * sizeof(Entry))) {
-            free(row_off);
-            errno = ENOMEM;
-            goto failure;
-      }
-
-      // Second pass: fill CSR data
-      memset(row_counts, 0, (size_t)M * sizeof(int));
+      // Second pass: fill CSR
+      memset(row_counts, 0, (size_t)M * sizeof *row_counts);
       if (fseek(f, header_pos, SEEK_SET) != 0) {
-            errno = EIO;
-            free(row_off);
-            free(entries);
-            goto failure;
+            ret_errno = -EIO;
+            goto cleanup;
       }
 
-      for (int e = 0; e < nz0; ++e) {
+      for (int e = 0, i, j; e < nz0; ++e) {
+            double v;
             if (is_pat) {
-                  fscanf(f, "%d %d", &i, &j);
+                  if (fscanf(f, "%d %d", &i, &j) != 2) {
+                        ret_errno = -EIO;
+                        goto cleanup;
+                  }
                   v = 1.0;
             } else {
-                  fscanf(f, "%d %d %lf", &i, &j, &v);
+                  if (fscanf(f, "%d %d %lf", &i, &j, &v) != 3) {
+                        ret_errno = -EIO;
+                        goto cleanup;
+                  }
             }
             --i;
             --j;
-            long idx = (long)row_off[i] + row_counts[i]++;
-            entries[idx].col = j;
-            entries[idx].val = v;
+            long idx = (long)IRP[i] + row_counts[i]++;
+            JA[idx] = j;
+            AS[idx] = v;
             if (is_sym && i != j) {
-                  long idx2 = (long)row_off[j] + row_counts[j]++;
-                  entries[idx2].col = i;
-                  entries[idx2].val = v;
+                  long idx2 = (long)IRP[j] + row_counts[j]++;
+                  JA[idx2] = i;
+                  AS[idx2] = v;
             }
       }
-      fclose(f);
-      free(row_counts);
 
-      SparseCSR *A = malloc(sizeof *A);
+      A = malloc(sizeof(sparse_csr));
       if (!A) {
-            free(row_off);
-            free(entries);
-            return ERR_PTR(ENOMEM);
+            ret_errno = -ENOMEM;
+            goto cleanup;
       }
+      init_csr(A, m_name, M, N, (int)total_nnz, IRP, JA, AS);
 
-      init_csr(A, m_name, M, N, (int)total_nnz, row_off, entries);
-      return A;
+cleanup:
+      if (row_counts)
+            free(row_counts);
+      if (ret_errno && IRP)
+            free(IRP);
+      if (ret_errno && JA)
+            free(JA);
+      if (ret_errno && AS)
+            free(AS);
+      if (f)
+            fclose(f);
 
-failure:
-      free(row_counts);
-      fclose(f);
-      return ERR_PTR(-errno);
+      if (ret_errno)
+            return ERR_PTR(ret_errno);
+      else
+            return A;
 }
 
-void csr_free(SparseCSR *A) {
+void csr_free(sparse_csr *A) {
       if (!A)
             return;
-      free(A->row_off);
-      free(A->entries);
+      free(A->IRP);
+      free(A->JA);
+      free(A->AS);
       free(A);
 }
 
-static inline void csr_spmv_serial(const SparseCSR *A, const double *x,
+static inline void csr_spmv_serial(const sparse_csr *A, const double *x,
                                    double *y) {
-      for (int i = 0; i < A->rows; i++) {
+      for (int i = 0; i < A->M; i++) {
             double sum = 0.0;
-            for (int k = A->row_off[i]; k < A->row_off[i + 1]; k++) {
-                  Entry entry = A->entries[k];
-                  sum += entry.val * x[entry.col];
+            for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
+                  sum += A->AS[j] * x[A->JA[j]];
             }
 
             y[i] = sum;
@@ -178,20 +189,28 @@ static inline void csr_spmv_serial(const SparseCSR *A, const double *x,
 }
 
 // Run CSR SpMV serial benchmark
-Bench bench_csr_serial(const SparseCSR *A) {
-      VecD *x = vec_create(A->cols);
-      VecD *y = vec_create(A->rows);
-      vec_fill(x, 1.0);
+int bench_csr_serial(const sparse_csr *A, bench *out) {
+      vec x = vec_create(A->N);
+      if (!x.data)
+            return -ENOMEM;
+      
+      vec_fill(&x, 1.0);
+
+      vec y = vec_create(A->M);
+      if (!y.data) {
+            vec_put(&x);
+            return -ENOMEM;
+      }
 
       double start = now();
-      csr_spmv_serial(A, x->data, y->data);
+      csr_spmv_serial(A, x.data, y.data);
       double end = now();
 
-      Bench result = {.duration = end - start,
-                      .gflops = compute_gflops(end - start, A->nnz)};
+      vec_put(&x);
+      vec_put(&y);
 
-      vec_free(x);
-      vec_free(y);
+      out->duration_ms = end - start;
+      out->gflops = compute_gflops(end - start, A->NZ);
 
-      return result;
+      return 0;
 }

@@ -1,3 +1,2 @@
-matrix,format,benchmark,rows,cols,nnz,duration,gflops
-cage4,CSR,serial,9,9,49,0.000002,0.049000
-cage4,HLL,serial,9,9,49,0.000002,0.049000
+matrix,format,benchmark,rows,cols,nnz,duration_ms,gflops
+cop20k_A,CSR,serial,121192,121192,2624331,4.728000,1.110123

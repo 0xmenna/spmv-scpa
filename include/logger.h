@@ -18,12 +18,12 @@ void logger_close(void);
  * Logs one CSR serial‐benchmark line:
  *    name,format,impl,rows,cols,nnz,num_blocks,block_size,duration_s,gflops
  */
-void log_csr_serial_benchmark(const SparseCSR *A, Bench res);
+void log_csr_serial_benchmark(const sparse_csr *A, bench res);
 
 /**
  * Logs one HLL serial‐benchmark line:
  *    name,format,impl,rows,cols,nnz,num_blocks,block_size,duration_s,gflops
  */
-void log_hll_serial_benchmark(const BlockELLPACK *H, Bench res);
+void log_hll_serial_benchmark(const BlockELLPACK *H, bench res);
 
 #endif // LOGGER_H
