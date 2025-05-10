@@ -193,7 +193,7 @@ int bench_csr_serial(const sparse_csr *A, bench *out) {
       vec x = vec_create(A->N);
       if (!x.data)
             return -ENOMEM;
-      
+
       vec_fill(&x, 1.0);
 
       vec y = vec_create(A->M);
@@ -207,10 +207,10 @@ int bench_csr_serial(const sparse_csr *A, bench *out) {
       double end = now();
 
       vec_put(&x);
-      vec_put(&y);
 
       out->duration_ms = end - start;
       out->gflops = compute_gflops(end - start, A->NZ);
+      out->data = y;
 
       return 0;
 }

@@ -1,2 +1,3 @@
-matrix,format,benchmark,rows,cols,nnz,duration_ms,gflops
-cop20k_A,CSR,serial,121192,121192,2624331,4.728000,1.110123
+matrix,format,benchmark,rows,cols,nnz,num_blocks,duration_ms,gflops
+cant,CSR,serial,62451,62451,4007383,,5.028000,1.594027
+cant,HLL,serial,62451,62451,4007383,1952,5.976000,1.341159

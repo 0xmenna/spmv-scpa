@@ -6,11 +6,14 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "vector.h"
+
 #define MAX_PATH 256
 
 typedef struct benchmark_result {
       double duration_ms;
       double gflops;
+      vec data;
 } bench;
 
 #define LOG_WARN(fmt, ...)                                                     \
@@ -26,6 +29,8 @@ typedef struct benchmark_result {
       } while (0)
 
 void log_prog_usage(const char *prog);
+
+void print_result_vector(const vec res, const char *fmt);
 
 // Get the current time in milliseconds
 inline double now(void) { return (double)clock() * 1e3 / CLOCKS_PER_SEC; }

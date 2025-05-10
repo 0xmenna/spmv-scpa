@@ -14,16 +14,8 @@ int logger_init(const char *log_path);
 /** Flushes and closes the log file. */
 void logger_close(void);
 
-/**
- * Logs one CSR serial‐benchmark line:
- *    name,format,impl,rows,cols,nnz,num_blocks,block_size,duration_s,gflops
- */
 void log_csr_serial_benchmark(const sparse_csr *A, bench res);
 
-/**
- * Logs one HLL serial‐benchmark line:
- *    name,format,impl,rows,cols,nnz,num_blocks,block_size,duration_s,gflops
- */
-void log_hll_serial_benchmark(const BlockELLPACK *H, bench res);
+void log_hll_serial_benchmark(const sparse_hll *H, bench res);
 
 #endif // LOGGER_H

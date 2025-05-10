@@ -1,7 +1,8 @@
 // hll.c
 
-#include <stdlib.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../include/csr.h"
 #include "../include/err.h"
@@ -9,116 +10,107 @@
 #include "../include/vector.h"
 
 /**
- * Convert a CSR matrix into BlockELLPACK with given HACK_SIZE.
+ * Convert a CSR matrix into a HLL matrix.
  * @return NULL on error.
  */
-BlockELLPACK *csr_to_hll(const sparse_csr *A) {
+sparse_hll *csr_to_hll(const sparse_csr *A) {
       int M = A->M;
+      int N = A->N;
       int blocks = (M + HACK_SIZE - 1) / HACK_SIZE;
 
-      // 1) Count nonzeros per row and total nnz
-      int *nnz_per = malloc(M * sizeof(int));
-      if (!nnz_per)
-            return NULL;
-
-      // 2) Allocate and init top-level structure
-      BlockELLPACK *H = malloc(sizeof(*H));
+      sparse_hll *H = malloc(sizeof(*H));
       if (!H) {
-            free(nnz_per);
-            return NULL;
+            return ERR_PTR(-ENOMEM);
       }
 
-      init_hll(H, A->name, A->NZ, A->M, A->N, blocks);
+      // Initialize the HLL header
+      init_hll(H, A->name, A->M, A->N, A->NZ, blocks);
 
-      H->blocks = calloc(blocks, sizeof(*H->blocks));
+      H->blocks = aligned_malloc(blocks * sizeof(ellpack_block));
       if (!H->blocks) {
-            free(nnz_per);
             free(H);
-            return NULL;
+            return ERR_PTR(-ENOMEM);
       }
 
-      // 3) For each block, compute max per row and populate
       for (int b = 0; b < blocks; b++) {
-            int r0 = b * HACK_SIZE;
-            int r1 = (r0 + HACK_SIZE < M ? r0 + HACK_SIZE : M);
-            int br = r1 - r0;
+            int row_start = b * HACK_SIZE;
+            int row_end =
+                (row_start + HACK_SIZE < M ? row_start + HACK_SIZE : M);
+            int blk_rows = row_end - row_start;
 
-            // find maximum nnz in this block
-            int maxr = 0;
-            for (int i = r0; i < r1; i++) {
-                  if (nnz_per[i] > maxr)
-                        maxr = nnz_per[i];
+            // Find the max # of nonzeros in any row in this block, and the
+            // total NZ in the block
+            int max_nnz = 0;
+            int total_nnz = 0;
+            for (int i = row_start; i < row_end; i++) {
+                  int r_nz = A->IRP[i + 1] - A->IRP[i];
+                  total_nnz += r_nz;
+                  if (r_nz > max_nnz)
+                        max_nnz = r_nz;
             }
 
             ellpack_block *blk = &H->blocks[b];
-            blk->block_rows = br;
-            blk->max_per_row = maxr;
+            init_ellpack_block(blk, blk_rows, N, total_nnz, max_nnz);
 
-            // allocate storage
-            blk->col_idx = malloc(br * maxr * sizeof(int));
-            blk->block_vals = malloc(br * maxr * sizeof(double));
-            if (!blk->col_idx || !blk->block_vals) {
-                  // cleanup
-                  for (int j = 0; j <= b; j++) {
-                        free(H->blocks[j].col_idx);
-                        free(H->blocks[j].block_vals);
+            int total_len = blk_rows * max_nnz;
+
+            blk->JA = aligned_malloc(sizeof(int) * total_len);
+            blk->AS = aligned_malloc(sizeof(double) * total_len);
+            if (!blk->JA || !blk->AS) {
+                  // Clean up previously allocated memory
+                  for (int bb = 0; bb <= b; bb++) {
+                        free(H->blocks[bb].JA);
+                        free(H->blocks[bb].AS);
                   }
                   free(H->blocks);
                   free(H);
-                  free(nnz_per);
-                  return NULL;
+                  return ERR_PTR(-ENOMEM);
             }
 
-            // init empty
-            for (int i = 0; i < br * maxr; i++) {
-                  blk->col_idx[i] = -1;
-                  blk->block_vals[i] = 0.0;
-            }
+            memset(blk->JA, -1, sizeof(int) * total_len);
+            memset(blk->AS, 0, sizeof(double) * total_len);
 
-            // fill from CSR
-            for (int i = r0; i < r1; i++) {
-                  int off = (i - r0) * maxr;
-                  int start = A->IRP[i];
-                  int end = A->IRP[i + 1];
-                  int p = 0;
-                  for (int k = start; k < end; k++, p++) {
-                        blk->col_idx[off + p] = A->JA[k];
-                        blk->block_vals[off + p] = A->AS[k];
+            for (int i = 0; i < blk_rows; i++) {
+                  int row = row_start + i;
+                  int start = A->IRP[row];
+                  int row_nz = A->IRP[row + 1] - start;
+                  for (int j = 0; j < row_nz; j++) {
+                        blk->JA[i * max_nnz + j] = A->JA[start + j];
+                        blk->AS[i * max_nnz + j] = A->AS[start + j];
                   }
             }
       }
 
-      free(nnz_per);
       return H;
 }
 
-void hll_free(BlockELLPACK *H) {
+void hll_free(sparse_hll *H) {
       if (!H)
             return;
-      for (int b = 0; b < H->num_blocks; b++) {
-            free(H->blocks[b].col_idx);
-            free(H->blocks[b].block_vals);
+      for (int i = 0; i < H->num_blocks; i++) {
+            free(H->blocks[i].JA);
+            free(H->blocks[i].AS);
       }
       free(H->blocks);
       free(H);
 }
 
-static void inline hll_spmv_serial(const BlockELLPACK *H, const double *x,
+static void inline hll_spmv_serial(const sparse_hll *H, const double *x,
                                    double *y) {
       for (int b = 0; b < H->num_blocks; b++) {
             const ellpack_block *blk = &H->blocks[b];
-            int br = blk->block_rows;
-            int mz = blk->max_per_row;
+            int M = blk->M;
+            int max_NZ = blk->max_NZ;
             int base = b * HACK_SIZE;
 
-            for (int i = 0; i < br; i++) {
+            for (int i = 0; i < M; i++) {
                   double sum = 0.0;
-                  int off = i * mz;
-                  for (int p = 0; p < mz; p++) {
-                        int c = blk->col_idx[off + p];
+                  int off = i * max_NZ;
+                  for (int j = 0; j < max_NZ; j++) {
+                        int c = blk->JA[off + j];
                         if (c < 0)
                               break;
-                        sum += blk->block_vals[off + p] * x[c];
+                        sum += blk->AS[off + j] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -126,28 +118,28 @@ static void inline hll_spmv_serial(const BlockELLPACK *H, const double *x,
 }
 
 // Run HLL SpMV serial benchmark
-int bench_hll_serial(const BlockELLPACK *H, bench *out) {
-      vec x = vec_create(H->cols);
+int bench_hll_serial(const sparse_hll *H, bench *out) {
+      vec x = vec_create(H->N);
       if (!x.data)
             return -ENOMEM;
 
       vec_fill(&x, 1.0);
 
-      vec y = vec_create(H->rows);
+      vec y = vec_create(H->M);
       if (!y.data) {
             vec_put(&x);
             return -ENOMEM;
       }
-      
+
       double start = now();
       hll_spmv_serial(H, x.data, y.data);
       double end = now();
 
       vec_put(&x);
-      vec_put(&y);
 
       out->duration_ms = end - start;
-      out->gflops = compute_gflops(end - start, H->nnz);
+      out->gflops = compute_gflops(end - start, H->NZ);
+      out->data = y;
 
       return 0;
 }

@@ -7,29 +7,40 @@
 
 #define HACK_SIZE 32
 
-/** Blocked-ELLPACK (“HLL”) block */
+/** ELLPACK block */
 typedef struct {
-      int block_rows;
-      int max_per_row;
-      int *col_idx;
-      double *block_vals;
+      int M, N, NZ;
+      int max_NZ;
+      int *JA;
+      double *AS;
 } ellpack_block;
 
-/** Full Blocked-ELLPACK matrix */
+static inline void init_ellpack_block(ellpack_block *blk, int M, int N, int NZ,
+                                      int max_NZ) {
+      blk->M = M;
+      blk->N = N;
+      blk->NZ = NZ;
+      blk->max_NZ = max_NZ;
+      blk->JA = NULL;
+      blk->AS = NULL;
+}
+
+/** HLL matrix */
 typedef struct {
       char name[MAX_NAME];
-      int nnz;
-      int rows, cols;
+      int M, N, NZ;
+      int hack_size;
       int num_blocks;
       ellpack_block *blocks;
-} BlockELLPACK;
+} sparse_hll;
 
-static inline void init_hll(BlockELLPACK *H, const char *name, int nnz,
-                            int rows, int cols, int num_blocks) {
+static inline void init_hll(sparse_hll *H, const char *name, int M, int N,
+                            int NZ, int num_blocks) {
       snprintf(H->name, sizeof(H->name), "%s", name);
-      H->nnz = nnz;
-      H->rows = rows;
-      H->cols = cols;
+      H->M = M;
+      H->N = N;
+      H->NZ = NZ;
+      H->hack_size = HACK_SIZE;
       H->num_blocks = num_blocks;
       H->blocks = NULL;
 }
@@ -38,11 +49,11 @@ static inline void init_hll(BlockELLPACK *H, const char *name, int nnz,
  * Convert a CSR matrix into BlockELLPACK.
  * @return NULL on error.
  */
-BlockELLPACK *csr_to_hll(const sparse_csr *A);
+sparse_hll *csr_to_hll(const sparse_csr *A);
 
 /** Free a BlockELLPACK */
-void hll_free(BlockELLPACK *H);
+void hll_free(sparse_hll *H);
 
-int bench_hll_serial(const BlockELLPACK *H, bench *out);
+int bench_hll_serial(const sparse_hll *H, bench *out);
 
 #endif /* SPARSE_HLL_H */
