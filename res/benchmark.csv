@@ -1,3 +1,3 @@
 matrix,format,benchmark,rows,cols,nnz,num_blocks,duration_ms,gflops
-cant,CSR,serial,62451,62451,4007383,,5.028000,1.594027
-cant,HLL,serial,62451,62451,4007383,1952,5.976000,1.341159
+cant,CSR,serial,62451,62451,4007383,,4.875000,1.644055
+cant,HLL,serial,62451,62451,4007383,1952,9.345000,0.857653

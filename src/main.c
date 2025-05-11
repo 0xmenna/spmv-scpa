@@ -87,12 +87,12 @@ int main(int argc, char **argv) {
       vec_put(&res.data);
 
       // HLL serial benchmark
-      H = csr_to_hll(A);
+      H = csr_to_hll(A, false);
       if (IS_ERR(H)) {
             LOG_ERR("Failed to convert CSR to HLL (err %d)", PTR_ERR(H));
             goto cleanup;
       }
-      ret = bench_hll_serial(H, &res);
+      ret = bench_hll_serial(H, &res, false);
       if (ret) {
             LOG_ERR("Failed to run HLL benchmark (err %d)", ret);
             goto cleanup;

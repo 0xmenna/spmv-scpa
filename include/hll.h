@@ -1,9 +1,11 @@
 #ifndef SPARSE_HLL_H
 #define SPARSE_HLL_H
 
+#include <stdbool.h>
+#include <stdlib.h>
+
 #include "csr.h"
 #include "utils.h"
-#include <stdlib.h>
 
 #define HACK_SIZE 32
 
@@ -49,11 +51,11 @@ static inline void init_hll(sparse_hll *H, const char *name, int M, int N,
  * Convert a CSR matrix into BlockELLPACK.
  * @return NULL on error.
  */
-sparse_hll *csr_to_hll(const sparse_csr *A);
+sparse_hll *csr_to_hll(const sparse_csr *A, bool is_col_major);
 
 /** Free a BlockELLPACK */
 void hll_free(sparse_hll *H);
 
-int bench_hll_serial(const sparse_hll *H, bench *out);
+int bench_hll_serial(const sparse_hll *H, bench *out, bool is_col_major);
 
 #endif /* SPARSE_HLL_H */

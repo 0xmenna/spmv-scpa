@@ -13,7 +13,7 @@
  * Convert a CSR matrix into a HLL matrix.
  * @return NULL on error.
  */
-sparse_hll *csr_to_hll(const sparse_csr *A) {
+sparse_hll *csr_to_hll(const sparse_csr *A, bool is_col_major) {
       int M = A->M;
       int N = A->N;
       int blocks = (M + HACK_SIZE - 1) / HACK_SIZE;
@@ -67,16 +67,23 @@ sparse_hll *csr_to_hll(const sparse_csr *A) {
                   return ERR_PTR(-ENOMEM);
             }
 
-            memset(blk->JA, -1, sizeof(int) * total_len);
-            memset(blk->AS, 0, sizeof(double) * total_len);
+            for (int i = 0; i < total_len; i++) {
+                  blk->JA[i] = -1;
+                  blk->AS[i] = 0.0;
+            }
 
             for (int i = 0; i < blk_rows; i++) {
                   int row = row_start + i;
                   int start = A->IRP[row];
                   int row_nz = A->IRP[row + 1] - start;
                   for (int j = 0; j < row_nz; j++) {
-                        blk->JA[i * max_nnz + j] = A->JA[start + j];
-                        blk->AS[i * max_nnz + j] = A->AS[start + j];
+                        if (is_col_major) {
+                              blk->JA[j * blk_rows + i] = A->JA[start + j];
+                              blk->AS[j * blk_rows + i] = A->AS[start + j];
+                        } else {
+                              blk->JA[i * max_nnz + j] = A->JA[start + j];
+                              blk->AS[i * max_nnz + j] = A->AS[start + j];
+                        }
                   }
             }
       }
@@ -117,8 +124,29 @@ static void inline hll_spmv_serial(const sparse_hll *H, const double *x,
       }
 }
 
+static void inline hll_spmv_serial_col_major(const sparse_hll *H,
+                                             const double *x, double *y) {
+      for (int b = 0; b < H->num_blocks; b++) {
+            const ellpack_block *blk = &H->blocks[b];
+            int M = blk->M;
+            int max_NZ = blk->max_NZ;
+            int base = b * HACK_SIZE;
+
+            for (int i = 0; i < M; i++) {
+                  double sum = 0.0;
+                  for (int j = 0; j < max_NZ; j++) {
+                        int c = blk->JA[j * M + i];
+                        if (c < 0)
+                              break;
+                        sum += blk->AS[j * M + i] * x[c];
+                  }
+                  y[base + i] = sum;
+            }
+      }
+}
+
 // Run HLL SpMV serial benchmark
-int bench_hll_serial(const sparse_hll *H, bench *out) {
+int bench_hll_serial(const sparse_hll *H, bench *out, bool is_col_major) {
       vec x = vec_create(H->N);
       if (!x.data)
             return -ENOMEM;
@@ -131,9 +159,16 @@ int bench_hll_serial(const sparse_hll *H, bench *out) {
             return -ENOMEM;
       }
 
-      double start = now();
-      hll_spmv_serial(H, x.data, y.data);
-      double end = now();
+      double start, end;
+      if (is_col_major) {
+            start = now();
+            hll_spmv_serial_col_major(H, x.data, y.data);
+            end = now();
+      } else {
+            start = now();
+            hll_spmv_serial(H, x.data, y.data);
+            end = now();
+      }
 
       vec_put(&x);
 
