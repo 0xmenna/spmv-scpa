@@ -1,6 +1,7 @@
 // csr.c
 
 #include <errno.h>
+#include <omp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -176,20 +177,9 @@ void csr_free(sparse_csr *A) {
       free(A);
 }
 
-static inline void csr_spmv_serial(const sparse_csr *A, const double *x,
-                                   double *y) {
-      for (int i = 0; i < A->M; i++) {
-            double sum = 0.0;
-            for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
-                  sum += A->AS[j] * x[A->JA[j]];
-            }
-
-            y[i] = sum;
-      }
-}
-
-// Run CSR SpMV serial benchmark
-int bench_csr_serial(const sparse_csr *A, bench *out) {
+static int compute_benchmark_csr(const sparse_csr *A, bench *out,
+                                 void (*spmv_f)(const sparse_csr *A,
+                                                const double *x, double *y)) {
       vec x = vec_create(A->N);
       if (!x.data)
             return -ENOMEM;
@@ -203,7 +193,7 @@ int bench_csr_serial(const sparse_csr *A, bench *out) {
       }
 
       double start = now();
-      csr_spmv_serial(A, x.data, y.data);
+      spmv_f(A, x.data, y.data);
       double end = now();
 
       vec_put(&x);
@@ -213,4 +203,83 @@ int bench_csr_serial(const sparse_csr *A, bench *out) {
       out->data = y;
 
       return 0;
+}
+
+static inline void csr_spmv_serial(const sparse_csr *A, const double *x,
+                                   double *y) {
+      for (int i = 0; i < A->M; i++) {
+            double sum = 0.0;
+            for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
+                  sum += A->AS[j] * x[A->JA[j]];
+            }
+
+            y[i] = sum;
+      }
+}
+
+static inline void csr_spmv_omp(const sparse_csr *A, const double *x,
+                                double *y) {
+      int M = A->M;
+      int T = omp_get_max_threads();
+
+      // 1) Build prefix-sum of NNZ per row
+      int *row_counts = malloc((M + 1) * sizeof(int));
+      row_counts[0] = 0;
+      for (int i = 0; i < M; i++)
+            row_counts[i + 1] = A->IRP[i + 1] - A->IRP[i];
+      for (int i = 1; i <= M; i++)
+            row_counts[i] += row_counts[i - 1];
+      long total_nnz = row_counts[M];
+
+      // 2) Determine per-thread row slices
+      int *row_start = malloc((T + 1) * sizeof(int));
+      row_start[0] = 0;
+      row_start[T] = M;
+      for (int t = 1; t < T; t++) {
+            long target = (total_nnz * t) / T;
+            // binary search in row_counts[0..M]
+            int lo = 0, hi = M;
+            while (lo < hi) {
+                  int mid = (lo + hi) >> 1;
+                  if (row_counts[mid] < target)
+                        lo = mid + 1;
+                  else
+                        hi = mid;
+            }
+            row_start[t] = lo;
+      }
+
+// 3) Parallel region: each thread its slice
+#pragma omp parallel
+      {
+            int tid = omp_get_thread_num();
+            int r0 = row_start[tid];
+            int r1 = row_start[tid + 1];
+
+            const int *IRP = A->IRP;
+            const int *JA = A->JA;
+            const double *AS = A->AS;
+            const double *x_ = x;
+            double *y_ = y;
+
+            for (int i = r0; i < r1; i++) {
+                  double sum = 0.0;
+                  for (int jj = IRP[i]; jj < IRP[i + 1]; jj++)
+                        sum += AS[jj] * x_[JA[jj]];
+                  y_[i] = sum;
+            }
+      }
+
+      free(row_counts);
+      free(row_start);
+}
+
+// Run CSR SpMV serial benchmark
+inline int bench_csr_serial(const sparse_csr *A, bench *out) {
+      return compute_benchmark_csr(A, out, csr_spmv_serial);
+}
+
+// Run CSR SpMV OpenMP benchmark
+inline int bench_csr_omp(const sparse_csr *A, bench *out) {
+      return compute_benchmark_csr(A, out, csr_spmv_omp);
 }

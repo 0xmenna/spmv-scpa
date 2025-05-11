@@ -35,4 +35,6 @@ void csr_free(sparse_csr *A);
 
 int bench_csr_serial(const sparse_csr *A, bench *out);
 
+int bench_csr_omp(const sparse_csr *A, bench *out);
+
 #endif /* SPARSE_CSR_H */
