@@ -1,5 +1,6 @@
 // csr.c
 
+#include <assert.h>
 #include <errno.h>
 #include <omp.h>
 #include <stdint.h>
@@ -12,6 +13,11 @@
 #include "../include/mmio.h"
 #include "../include/utils.h"
 #include "../include/vector.h"
+
+// The number of threads for OpenMP
+static int num_threads = 2;
+// The thread partitions for load balancing in OpenMP
+static int *partitions = NULL;
 
 void extract_matrix_name(const char *path, char *name_out) {
       const char *base = strrchr(path, '/');
@@ -178,8 +184,8 @@ void csr_free(sparse_csr *A) {
 }
 
 static int compute_benchmark_csr(const sparse_csr *A, bench *out,
-                                 void (*spmv_f)(const sparse_csr *A,
-                                                const double *x, double *y)) {
+                                 double (*spmv_f)(const sparse_csr *A,
+                                                  const double *x, double *y)) {
       vec x = vec_create(A->N);
       if (!x.data)
             return -ENOMEM;
@@ -192,21 +198,21 @@ static int compute_benchmark_csr(const sparse_csr *A, bench *out,
             return -ENOMEM;
       }
 
-      double start = now();
-      spmv_f(A, x.data, y.data);
-      double end = now();
+      double duration = spmv_f(A, x.data, y.data);
 
       vec_put(&x);
 
-      out->duration_ms = end - start;
-      out->gflops = compute_gflops(end - start, A->NZ);
+      out->duration_ms = duration;
+      out->gflops = compute_gflops(duration, A->NZ);
       out->data = y;
 
       return 0;
 }
 
-static inline void csr_spmv_serial(const sparse_csr *A, const double *x,
-                                   double *y) {
+static inline double csr_spmv_serial(const sparse_csr *A, const double *x,
+                                     double *y) {
+
+      double start = now();
       for (int i = 0; i < A->M; i++) {
             double sum = 0.0;
             for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
@@ -215,63 +221,119 @@ static inline void csr_spmv_serial(const sparse_csr *A, const double *x,
 
             y[i] = sum;
       }
+      double end = now();
+
+      return end - start;
 }
 
-static inline void csr_spmv_omp(const sparse_csr *A, const double *x,
-                                double *y) {
+static int *partition_csr_rows(const sparse_csr *A, int *num_threads) {
+
       int M = A->M;
-      int T = omp_get_max_threads();
+      int max_t = *num_threads;
 
-      // 1) Build prefix-sum of NNZ per row
-      int *row_counts = malloc((M + 1) * sizeof(int));
-      row_counts[0] = 0;
-      for (int i = 0; i < M; i++)
-            row_counts[i + 1] = A->IRP[i + 1] - A->IRP[i];
-      for (int i = 1; i <= M; i++)
-            row_counts[i] += row_counts[i - 1];
-      long total_nnz = row_counts[M];
-
-      // 2) Determine per-thread row slices
-      int *row_start = malloc((T + 1) * sizeof(int));
-      row_start[0] = 0;
-      row_start[T] = M;
-      for (int t = 1; t < T; t++) {
-            long target = (total_nnz * t) / T;
-            // binary search in row_counts[0..M]
-            int lo = 0, hi = M;
-            while (lo < hi) {
-                  int mid = (lo + hi) >> 1;
-                  if (row_counts[mid] < target)
-                        lo = mid + 1;
-                  else
-                        hi = mid;
-            }
-            row_start[t] = lo;
+      // Count nonzeros per row
+      int *nz_per_row = malloc(M * sizeof(int));
+      if (!nz_per_row) {
+            return ERR_PTR(-ENOMEM);
       }
 
-// 3) Parallel region: each thread its slice
-#pragma omp parallel
+      long total_nz = 0;
+      for (int r = 0; r < M; r++) {
+            nz_per_row[r] = A->IRP[r + 1] - A->IRP[r];
+            total_nz += nz_per_row[r];
+      }
+
+      int *starts = malloc((max_t + 1) * sizeof(int));
+      if (!starts) {
+            free(nz_per_row);
+            return ERR_PTR(-ENOMEM);
+      }
+
+      // Target workload per thread
+      double target = (double)total_nz / max_t;
+
+      int curr_tid = 0;
+      starts[curr_tid] = 0;
+      double running = 0.0;
+
+      for (int r = 0; r < M && curr_tid < max_t - 1; r++) {
+            running += nz_per_row[r];
+
+            if (running >= target) {
+                  curr_tid++;
+                  starts[curr_tid] = r + 1;
+
+                  running = 0.0;
+            }
+      }
+
+      starts[curr_tid + 1] = M;
+
+      int used_threads = curr_tid + 1;
+      if (used_threads < max_t) {
+            *num_threads = used_threads;
+            int *shrunken = realloc(starts, (used_threads + 1) * sizeof(int));
+            if (!shrunken) {
+                  free(starts);
+                  free(nz_per_row);
+                  return ERR_PTR(-ENOMEM);
+            }
+            starts = shrunken;
+      }
+
+      free(nz_per_row);
+
+      return starts;
+}
+
+static inline double csr_spmv_omp_guided(const sparse_csr *restrict A,
+                                         const double *restrict x,
+                                         double *restrict y) {
+
+      double start = omp_get_wtime();
+
+#pragma omp parallel for schedule(guided) num_threads(num_threads)
+      for (int i = 0; i < A->M; i++) {
+            double sum = 0.0;
+            for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
+                  sum += A->AS[j] * x[A->JA[j]];
+            }
+            y[i] = sum;
+      }
+
+      double end = omp_get_wtime();
+
+      return (end - start) * 1e3;
+}
+
+static inline double csr_spmv_omp_nnz_balancing(const sparse_csr *restrict A,
+                                                const double *restrict x,
+                                                double *restrict y) {
+
+      // Ensure input arrays are cache-line aligned
+      assert(((uintptr_t)A->AS % ALIGNMENT) == 0);
+      assert(((uintptr_t)A->JA % ALIGNMENT) == 0);
+      assert(((uintptr_t)x % ALIGNMENT) == 0);
+
+      assert(num_threads <= omp_get_max_threads());
+
+      double start = omp_get_wtime();
+#pragma omp parallel num_threads(num_threads)
       {
             int tid = omp_get_thread_num();
-            int r0 = row_start[tid];
-            int r1 = row_start[tid + 1];
-
-            const int *IRP = A->IRP;
-            const int *JA = A->JA;
-            const double *AS = A->AS;
-            const double *x_ = x;
-            double *y_ = y;
-
+            int r0 = partitions[tid];
+            int r1 = partitions[tid + 1];
             for (int i = r0; i < r1; i++) {
                   double sum = 0.0;
-                  for (int jj = IRP[i]; jj < IRP[i + 1]; jj++)
-                        sum += AS[jj] * x_[JA[jj]];
-                  y_[i] = sum;
+                  for (int j = A->IRP[i]; j < A->IRP[i + 1]; j++) {
+                        sum += A->AS[j] * x[A->JA[j]];
+                  }
+                  y[i] = sum;
             }
       }
+      double end = omp_get_wtime();
 
-      free(row_counts);
-      free(row_start);
+      return (end - start) * 1e3;
 }
 
 // Run CSR SpMV serial benchmark
@@ -279,7 +341,39 @@ inline int bench_csr_serial(const sparse_csr *A, bench *out) {
       return compute_benchmark_csr(A, out, csr_spmv_serial);
 }
 
-// Run CSR SpMV OpenMP benchmark
-inline int bench_csr_omp(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_omp);
+// Run CSR SpMV OpenMP benchmark (guided scheduling)
+inline int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out) {
+      int ret;
+
+      num_threads = out->num_threads;
+
+      ret = compute_benchmark_csr(A, &out->bench, csr_spmv_omp_guided);
+
+      snprintf(out->name, sizeof(out->name), "omp_guided");
+
+      return ret;
+}
+
+// Run CSR SpMV OpenMP benchmark (schduled based on nnz)
+inline int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
+      int ret;
+
+      // Ensure we cleaned any previous partitions
+      assert(partitions == NULL);
+
+      partitions = partition_csr_rows(A, &out->num_threads);
+      if (IS_ERR(partitions)) {
+            return PTR_ERR(partitions);
+      }
+      num_threads = out->num_threads;
+
+      ret = compute_benchmark_csr(A, &out->bench, csr_spmv_omp_nnz_balancing);
+
+      // Clean up partitions
+      free(partitions);
+      partitions = NULL;
+
+      snprintf(out->name, sizeof(out->name), "omp_nnz");
+
+      return ret;
 }

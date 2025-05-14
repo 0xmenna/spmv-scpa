@@ -56,6 +56,8 @@ sparse_hll *csr_to_hll(const sparse_csr *A, bool is_col_major);
 /** Free a BlockELLPACK */
 void hll_free(sparse_hll *H);
 
-int bench_hll_serial(const sparse_hll *H, bench *out, bool is_col_major);
+int bench_hll_serial(const sparse_hll *H, bench *out);
+
+int bench_hll_omp(const sparse_hll *H, bench_omp *out);
 
 #endif /* SPARSE_HLL_H */

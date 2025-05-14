@@ -1,6 +1,8 @@
 // hll.c
 
+#include <assert.h>
 #include <errno.h>
+#include <omp.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,6 +10,9 @@
 #include "../include/err.h"
 #include "../include/hll.h"
 #include "../include/vector.h"
+
+// The number of threads for OpenMP
+static int num_threads = 2;
 
 /**
  * Convert a CSR matrix into a HLL matrix.
@@ -102,8 +107,35 @@ void hll_free(sparse_hll *H) {
       free(H);
 }
 
-static void inline hll_spmv_serial(const sparse_hll *H, const double *x,
-                                   double *y) {
+static int compute_benchmark_hll(const sparse_hll *H, bench *out,
+                                 double (*spmv_f)(const sparse_hll *H,
+                                                  const double *x, double *y)) {
+      vec x = vec_create(H->N);
+      if (!x.data)
+            return -ENOMEM;
+
+      vec_fill(&x, 1.0);
+
+      vec y = vec_create(H->M);
+      if (!y.data) {
+            vec_put(&x);
+            return -ENOMEM;
+      }
+
+      double duration = spmv_f(H, x.data, y.data);
+
+      vec_put(&x);
+
+      out->duration_ms = duration;
+      out->gflops = compute_gflops(duration, H->NZ);
+      out->data = y;
+
+      return 0;
+}
+
+static inline double hll_spmv_serial(const sparse_hll *H, const double *x,
+                                     double *y) {
+      double start = now();
       for (int b = 0; b < H->num_blocks; b++) {
             const ellpack_block *blk = &H->blocks[b];
             int M = blk->M;
@@ -122,10 +154,15 @@ static void inline hll_spmv_serial(const sparse_hll *H, const double *x,
                   y[base + i] = sum;
             }
       }
+      double end = now();
+
+      return end - start;
 }
 
-static void inline hll_spmv_serial_col_major(const sparse_hll *H,
-                                             const double *x, double *y) {
+static inline double _hll_spmv_serial_col_major(const sparse_hll *H,
+                                                const double *x, double *y) {
+
+      double start = now();
       for (int b = 0; b < H->num_blocks; b++) {
             const ellpack_block *blk = &H->blocks[b];
             int M = blk->M;
@@ -143,38 +180,52 @@ static void inline hll_spmv_serial_col_major(const sparse_hll *H,
                   y[base + i] = sum;
             }
       }
+      double end = now();
+
+      return end - start;
+}
+
+static inline double hll_spmv_omp(const sparse_hll *restrict H,
+                                  const double *restrict x,
+                                  double *restrict y) {
+
+      assert(num_threads <= omp_get_max_threads());
+
+      double start = omp_get_wtime();
+
+// Each thread is assigned to an ellpack block execution.
+#pragma omp parallel for schedule(guided) num_threads(num_threads)
+      for (int b = 0; b < H->num_blocks; b++) {
+            const ellpack_block blk = H->blocks[b];
+            int M = blk.M;
+            int max_NZ = blk.max_NZ;
+            int base = b * HACK_SIZE;
+
+            for (int i = 0; i < M; i++) {
+                  double sum = 0.0;
+                  int off = i * max_NZ;
+                  for (int j = 0; j < max_NZ; j++) {
+                        int c = blk.JA[off + j];
+                        if (c < 0)
+                              break;
+                        sum += blk.AS[off + j] * x[c];
+                  }
+                  y[base + i] = sum;
+            }
+      }
+
+      double end = omp_get_wtime();
+
+      return (end - start) * 1e3;
 }
 
 // Run HLL SpMV serial benchmark
-int bench_hll_serial(const sparse_hll *H, bench *out, bool is_col_major) {
-      vec x = vec_create(H->N);
-      if (!x.data)
-            return -ENOMEM;
+inline int bench_hll_serial(const sparse_hll *H, bench *out) {
+      return compute_benchmark_hll(H, out, hll_spmv_serial);
+}
 
-      vec_fill(&x, 1.0);
+inline int bench_hll_omp(const sparse_hll *H, bench_omp *out) {
+      num_threads = out->num_threads;
 
-      vec y = vec_create(H->M);
-      if (!y.data) {
-            vec_put(&x);
-            return -ENOMEM;
-      }
-
-      double start, end;
-      if (is_col_major) {
-            start = now();
-            hll_spmv_serial_col_major(H, x.data, y.data);
-            end = now();
-      } else {
-            start = now();
-            hll_spmv_serial(H, x.data, y.data);
-            end = now();
-      }
-
-      vec_put(&x);
-
-      out->duration_ms = end - start;
-      out->gflops = compute_gflops(end - start, H->NZ);
-      out->data = y;
-
-      return 0;
+      return compute_benchmark_hll(H, &out->bench, hll_spmv_omp);
 }
