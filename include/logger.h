@@ -18,4 +18,8 @@ void log_csr_serial_benchmark(const sparse_csr *A, bench res);
 
 void log_hll_serial_benchmark(const sparse_hll *H, bench res);
 
+void log_csr_omp_benchmark(const sparse_csr *A, bench_omp res);
+
+void log_hll_omp_benchmark(const sparse_hll *H, bench_omp res);
+
 #endif // LOGGER_H

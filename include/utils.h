@@ -10,11 +10,31 @@
 
 #define MAX_PATH 256
 
+#define ALIGNMENT 64
+
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+#define MAX_NAME 64
+
+enum BENCH_TYPE {
+      CSR_SERIAL,
+      HLL_SERIAL,
+      CSR_OMP_GUIDED,
+      CSR_OMP_CUSTOM,
+      HLL_OMP
+};
+
 typedef struct benchmark_result {
       double duration_ms;
       double gflops;
       vec data;
 } bench;
+
+typedef struct benchmark_omp {
+      bench bench;
+      char name[MAX_NAME];
+      int num_threads;
+} bench_omp;
 
 #define LOG_WARN(fmt, ...)                                                     \
       do {                                                                     \
@@ -30,7 +50,9 @@ typedef struct benchmark_result {
 
 void log_prog_usage(const char *prog);
 
-void print_result_vector(const vec res, const char *fmt);
+void print_result_vector(const vec res);
+
+int validation_vec_result(const vec expected, const vec res);
 
 // Get the current time in milliseconds
 inline double now(void) { return (double)clock() * 1e3 / CLOCKS_PER_SEC; }

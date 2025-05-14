@@ -6,8 +6,6 @@
 
 #include "../include/utils.h"
 
-#define ALIGNMENT 64
-
 void log_prog_usage(const char *prog) {
       fprintf(
           stderr,
@@ -19,8 +17,8 @@ void log_prog_usage(const char *prog) {
           prog);
 }
 
-void print_result_vector(const vec res, const char *fmt) {
-      printf("Result vector y (length %d) - Format %s.\n", res.len, fmt);
+void print_result_vector(const vec res) {
+      printf("Result vector y (length %d)\n", res.len);
       for (int i = 0; i < res.len; i++) {
             printf("  y[%d] = %.4f\n", i, res.data[i]);
       }
@@ -34,4 +32,16 @@ void *aligned_malloc(size_t size) {
             return NULL;
       }
       return ptr;
+}
+
+int validation_vec_result(const vec expected, const vec res) {
+      if (res.len != expected.len) {
+            return -1;
+      }
+      for (int i = 0; i < res.len; i++) {
+            if (res.data[i] != expected.data[i]) {
+                  return -1;
+            }
+      }
+      return 0;
 }

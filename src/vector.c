@@ -22,6 +22,7 @@ void vec_put(vec *v) {
       if (!v)
             return;
       free(v->data);
+      v->data = NULL;
 }
 
 void vec_fill(vec *v, double value) {

@@ -3,8 +3,6 @@
 
 #include "utils.h"
 
-#define MAX_NAME 64
-
 /** Compressed Sparse Row matrix */
 typedef struct sparse_matrix_csr {
       char name[MAX_NAME];
@@ -34,5 +32,9 @@ sparse_csr *io_load_csr(const char *path);
 void csr_free(sparse_csr *A);
 
 int bench_csr_serial(const sparse_csr *A, bench *out);
+
+int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out);
+
+int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out);
 
 #endif /* SPARSE_CSR_H */
