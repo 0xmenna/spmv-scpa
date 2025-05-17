@@ -6,27 +6,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/csr.h"
-#include "../include/err.h"
-#include "../include/hll.h"
-#include "../include/logger.h"
-#include "../include/utils.h"
+#include "csr.h"
+#include "err.h"
+#include "hll.h"
+#include "logger.h"
+#include "utils.h"
 
 static bool debug = false;
 static bool is_logger_open = false;
 
-// Benchmarks
-int run_benchmark(sparse_csr *A, sparse_hll *H, enum BENCH_TYPE bench);
+static sparse_csr *A = NULL;
+static sparse_hll *H = NULL;
+
+static vec expected_res = {0};
+
+static void run_benchmarks(void);
+static void cleanup(void);
 
 int main(int argc, char **argv) {
-      sparse_csr *A = NULL;
-      sparse_hll *H = NULL;
       bench res;
-      int ret;
 
       const char *matrix_path = NULL;
       const char *log_path = NULL;
-      enum BENCH_TYPE bench = CSR_SERIAL;
 
       // Define long options
       static struct option long_opts[] = {
@@ -47,23 +48,6 @@ int main(int argc, char **argv) {
                   break;
             case 'o':
                   log_path = optarg;
-                  break;
-            case 'b':
-                  if (strcmp(optarg, "csr-serial") == 0) {
-                        bench = CSR_SERIAL;
-                  } else if (strcmp(optarg, "hll-serial") == 0) {
-                        bench = HLL_SERIAL;
-                  } else if (strcmp(optarg, "csr-omp-guided") == 0) {
-                        bench = CSR_OMP_GUIDED;
-                  } else if (strcmp(optarg, "csr-omp-nnz") == 0) {
-                        bench = CSR_OMP_CUSTOM;
-                  } else if (strcmp(optarg, "hll-omp") == 0) {
-                        bench = HLL_OMP;
-                  } else {
-                        LOG_ERR("Invalid benchmark type: %s", optarg);
-                        log_prog_usage(basename(argv[0]));
-                        return EXIT_FAILURE;
-                  }
                   break;
             case 'd':
                   debug = true;
@@ -93,85 +77,88 @@ int main(int argc, char **argv) {
       if (!A) {
             LOG_ERR("Failed to load matrix: %s (err %d)", matrix_path,
                     PTR_ERR(A));
-            goto cleanup;
+            cleanup();
+
+            return EXIT_FAILURE;
       }
 
       H = csr_to_hll(A, false);
       if (IS_ERR(H)) {
             LOG_ERR("Failed to convert CSR to HLL (err %d)", PTR_ERR(H));
-            goto cleanup;
+            cleanup();
+
+            return EXIT_FAILURE;
       }
 
-      ret = run_benchmark(A, H, bench);
-      if (ret) {
-            LOG_ERR("Failed to run benchmark (err %d)", ret);
-            goto cleanup;
-      }
+      run_benchmarks();
 
-      ret = EXIT_SUCCESS;
+      cleanup();
 
-cleanup:
-      if (A)
-            csr_free(A);
-      if (H)
-            hll_free(H);
-
-      if (is_logger_open) {
-            logger_close();
-      }
-      return ret;
+      return EXIT_SUCCESS;
 }
 
-static int run_csr_serial_benchmark(sparse_csr *A, vec *expected) {
+static void cleanup(void) {
+      if (expected_res.data)
+            vec_put(&expected_res);
+      if (H)
+            hll_free(H);
+      if (A)
+            csr_free(A);
+      if (is_logger_open)
+            logger_close();
+}
+
+static void run_csr_serial_benchmark(void) {
       bench res;
       int ret;
 
       ret = bench_csr_serial(A, &res);
       if (ret) {
             LOG_ERR("[CSR serial] failed with error %d", ret);
-            return ret;
+            cleanup();
+
+            exit(EXIT_FAILURE);
       }
 
       log_csr_serial_benchmark(A, res);
 
       if (debug) {
             // Capture expected output for later validation
-            *expected = res.data;
+            expected_res = res.data;
       } else {
             vec_put(&res.data);
       }
-
-      return 0;
 }
 
-static int run_hll_serial_benchmark(sparse_hll *H, const vec expected) {
+static void run_hll_serial_benchmark(void) {
       bench res;
       int ret = bench_hll_serial(H, &res);
       if (ret) {
             LOG_ERR("[HLL serial] failed with error %d", ret);
-            return ret;
+            cleanup();
+
+            exit(EXIT_FAILURE);
       }
 
       log_hll_serial_benchmark(H, res);
 
       if (debug) {
-            ret = validation_vec_result(expected, res.data);
+            ret = validation_vec_result(expected_res, res.data);
             if (ret) {
                   vec_put(&res.data);
                   LOG_ERR("[HLL serial] validation failed");
-                  return ret;
+                  cleanup();
+
+                  exit(EXIT_FAILURE);
             }
       }
 
       vec_put(&res.data);
-
-      return 0;
 }
 
 typedef int (*csr_bench_fn)(const sparse_csr *, bench_omp *);
 
-static int run_csr_omp_benchmarks(sparse_csr *A, vec expected,
-                                  csr_bench_fn bench_fn) {
+static void run_csr_omp_benchmarks(csr_bench_fn bench_fn) {
       bench_omp benchmarks[] = {
           {.num_threads = 2},  {.num_threads = 4},  {.num_threads = 8},
           {.num_threads = 16}, {.num_threads = 32}, {.num_threads = 40},
@@ -181,37 +168,38 @@ static int run_csr_omp_benchmarks(sparse_csr *A, vec expected,
             int ret = bench_fn(A, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[CSR OMP] failed with error %d", ret);
-                  return ret;
+                  cleanup();
+
+                  exit(EXIT_FAILURE);
             }
 
             log_csr_omp_benchmark(A, benchmarks[i]);
 
             if (debug) {
-                  ret =
-                      validation_vec_result(expected, benchmarks[i].bench.data);
+                  ret = validation_vec_result(expected_res,
+                                              benchmarks[i].bench.data);
                   if (ret) {
                         vec_put(&benchmarks[i].bench.data);
                         LOG_ERR("[CSR OMP] validation failed");
-                        return ret;
+                        cleanup();
+
+                        exit(EXIT_FAILURE);
                   }
             }
 
             vec_put(&benchmarks[i].bench.data);
       }
-
-      return 0;
 }
 
-static inline int run_csr_omp_nnz_balancing_benchmarks(sparse_csr *A,
-                                                       vec expected) {
-      return run_csr_omp_benchmarks(A, expected, bench_csr_omp_nnz_balancing);
+static inline void run_csr_omp_nnz_balancing_benchmarks(void) {
+      return run_csr_omp_benchmarks(bench_csr_omp_nnz_balancing);
 }
 
-static inline int run_csr_omp_guided_benchmarks(sparse_csr *A, vec expected) {
-      return run_csr_omp_benchmarks(A, expected, bench_csr_omp_guided);
+static inline void run_csr_omp_guided_benchmarks(void) {
+      return run_csr_omp_benchmarks(bench_csr_omp_guided);
 }
 
-static int run_hll_omp_benchmarks(sparse_hll *H, vec expected) {
+static void run_hll_omp_benchmarks(void) {
       bench_omp benchmarks[] = {
           {.num_threads = 2},  {.num_threads = 4},  {.num_threads = 8},
           {.num_threads = 16}, {.num_threads = 32}, {.num_threads = 40},
@@ -222,68 +210,67 @@ static int run_hll_omp_benchmarks(sparse_hll *H, vec expected) {
             int ret = bench_hll_omp(H, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[HLL OMP] failed with error %d", ret);
-                  return ret;
+                  cleanup();
+
+                  exit(EXIT_FAILURE);
             }
 
             log_hll_omp_benchmark(H, benchmarks[i]);
 
             if (debug) {
                   // Validate against serial result
-                  ret =
-                      validation_vec_result(expected, benchmarks[i].bench.data);
+                  ret = validation_vec_result(expected_res,
+                                              benchmarks[i].bench.data);
                   if (ret) {
                         vec_put(&benchmarks[i].bench.data);
                         LOG_ERR("[HLL OMP] validation failed");
-                        return ret;
+                        cleanup();
+
+                        exit(EXIT_FAILURE);
                   }
             }
 
             vec_put(&benchmarks[i].bench.data);
       }
-      return 0;
 }
 
-int run_benchmark(sparse_csr *A, sparse_hll *H, enum BENCH_TYPE bench) {
-      vec expected = {0};
-      int ret;
+typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench *res);
 
-      if (debug) {
-            // Always run the serial benchmark for validation
-            ret = run_csr_serial_benchmark(A, &expected);
-            if (ret)
-                  goto cleanup;
-      }
+static inline void run_csr_cuda_benchmarks(void) {
+      csr_cuda_bench_fn kernels[] = {
+          bench_csr_cuda_thread_row,
+          bench_csr_cuda_warp_row,
 
-      switch (bench) {
-      case CSR_SERIAL:
-            if (debug) {
-                  // Already run in debug mode
-                  break;
+      };
+
+      bench res;
+      for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
+            int ret = kernels[kid](A, &res);
+            if (ret) {
+                  LOG_ERR("Failed CSR CUDA [kernel %d]", kid);
+                  goto err;
             }
-            ret = run_csr_serial_benchmark(A, &expected);
-            break;
-      case HLL_SERIAL:
-            ret = run_hll_serial_benchmark(H, expected);
-            break;
-      case CSR_OMP_CUSTOM:
-            ret = run_csr_omp_nnz_balancing_benchmarks(A, expected);
-            break;
-      case CSR_OMP_GUIDED:
-            ret = run_csr_omp_guided_benchmarks(A, expected);
-            break;
-      case HLL_OMP:
-            // sparse_hll *H_col_major = csr_to_hll(A, true);
-            ret = run_hll_omp_benchmarks(H, expected);
-            // free();
-            break;
-      default:
-            LOG_ERR("Invalid benchmark type");
-            return -EINVAL;
+            vec_put(&res.data);
+            log_csr_cuda_benchmark(A, res, kid);
       }
+      return;
 
-cleanup:
-      if (expected.data) {
-            vec_put(&expected);
-      }
-      return ret;
+err:
+      cleanup();
+      exit(EXIT_FAILURE);
+}
+
+static inline void run_benchmarks(void) {
+
+      run_csr_serial_benchmark();
+
+      run_hll_serial_benchmark();
+
+      run_csr_omp_nnz_balancing_benchmarks();
+
+      run_csr_omp_guided_benchmarks();
+
+      run_hll_omp_benchmarks();
+
+      run_csr_cuda_benchmarks();
 }

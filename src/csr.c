@@ -8,11 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/csr.h"
-#include "../include/err.h"
-#include "../include/mmio.h"
-#include "../include/utils.h"
-#include "../include/vector.h"
+#include "csr.h"
+#include "cuda_csr.h"
+#include "err.h"
+#include "mmio.h"
+#include "utils.h"
+#include "vector.h"
 
 // The number of threads for OpenMP
 static int num_threads = 2;
@@ -286,9 +287,9 @@ static int *partition_csr_rows(const sparse_csr *A, int *num_threads) {
       return starts;
 }
 
-static inline double csr_spmv_omp_guided(const sparse_csr *restrict A,
-                                         const double *restrict x,
-                                         double *restrict y) {
+static double csr_spmv_omp_guided(const sparse_csr *restrict A,
+                                  const double *restrict x,
+                                  double *restrict y) {
 
       double start = omp_get_wtime();
 
@@ -306,9 +307,9 @@ static inline double csr_spmv_omp_guided(const sparse_csr *restrict A,
       return (end - start) * 1e3;
 }
 
-static inline double csr_spmv_omp_nnz_balancing(const sparse_csr *restrict A,
-                                                const double *restrict x,
-                                                double *restrict y) {
+static double csr_spmv_omp_nnz_balancing(const sparse_csr *restrict A,
+                                         const double *restrict x,
+                                         double *restrict y) {
 
       // Ensure input arrays are cache-line aligned
       assert(((uintptr_t)A->AS % ALIGNMENT) == 0);
@@ -342,7 +343,7 @@ inline int bench_csr_serial(const sparse_csr *A, bench *out) {
 }
 
 // Run CSR SpMV OpenMP benchmark (guided scheduling)
-inline int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out) {
+int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out) {
       int ret;
 
       num_threads = out->num_threads;
@@ -355,7 +356,7 @@ inline int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out) {
 }
 
 // Run CSR SpMV OpenMP benchmark (schduled based on nnz)
-inline int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
+int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
       int ret;
 
       // Ensure we cleaned any previous partitions
@@ -376,4 +377,12 @@ inline int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
       snprintf(out->name, sizeof(out->name), "omp_nnz");
 
       return ret;
+}
+
+inline int bench_csr_cuda_thread_row(const sparse_csr *A, bench *out) {
+      return compute_benchmark_csr(A, out, csr_spmv_cuda_thread_row);
+}
+
+inline int bench_csr_cuda_warp_row(const sparse_csr *A, bench *out) {
+      return compute_benchmark_csr(A, out, csr_spmv_cuda_warp_row);
 }

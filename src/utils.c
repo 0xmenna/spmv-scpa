@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/utils.h"
+#include "utils.h"
 
 void log_prog_usage(const char *prog) {
       fprintf(

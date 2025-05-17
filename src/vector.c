@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/err.h"
-#include "../include/utils.h"
-#include "../include/vector.h"
+#include "err.h"
+#include "utils.h"
+#include "vector.h"
 
 vec vec_create(size_t n) {
       vec v;
