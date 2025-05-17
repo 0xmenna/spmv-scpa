@@ -16,14 +16,6 @@
 
 #define MAX_NAME 64
 
-enum BENCH_TYPE {
-      CSR_SERIAL,
-      HLL_SERIAL,
-      CSR_OMP_GUIDED,
-      CSR_OMP_CUSTOM,
-      HLL_OMP
-};
-
 typedef struct benchmark_result {
       double duration_ms;
       double gflops;
@@ -35,6 +27,11 @@ typedef struct benchmark_omp {
       char name[MAX_NAME];
       int num_threads;
 } bench_omp;
+
+typedef struct benchmark_cuda {
+      bench bench;
+      int kernel_id;
+} bench_cuda;
 
 #define LOG_WARN(fmt, ...)                                                     \
       do {                                                                     \

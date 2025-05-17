@@ -3,89 +3,146 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "../include/err.h"
-#include "../include/logger.h"
+#include "err.h"
+#include "logger.h"
 
-static FILE *log = NULL;
+static FILE *log_serial = NULL;
+static FILE *log_omp = NULL;
+static FILE *log_cuda = NULL;
 
-int logger_init(const char *log_path) {
-      if (log) {
-            return 0; // already initialized
-      }
+enum LOGGER_TYPE {
+      SERIAL,
+      OMP,
+      CUDA,
+};
 
-      // Check if the file already exists
+static FILE *open_log(const char *path, const enum LOGGER_TYPE type) {
       struct stat st;
-      int file_exists = (stat(log_path, &st) == 0);
+      int file_exists = (stat(path, &st) == 0);
 
-      // Open file in append mode
-      log = fopen(log_path, "a");
-      if (!log) {
-            return -1;
+      FILE *f = fopen(path, "a");
+      if (!f)
+            return NULL;
+
+      if (!file_exists) {
+
+            switch (type) {
+            case SERIAL:
+                  fprintf(f, "matrix,format,rows,cols,nnz,num_blocks,"
+                             "duration_ms,gflops\n");
+                  break;
+            case OMP:
+                  fprintf(f, "matrix,format,bench,rows,cols,nnz,num_blocks,"
+                             "num_threads,duration_ms,gflops\n");
+                  break;
+            case CUDA:
+                  fprintf(f, "matrix,format,kernel,rows,cols,nnz,num_blocks,"
+                             "duration_ms,gflops\n");
+                  break;
+            default:
+                  LOG_ERR("Invalid logger type");
+                  fclose(f);
+                  return NULL;
+                  break;
+            }
+
+            fflush(f);
       }
 
-      // If file did not exist, write the header
-      if (!file_exists) {
-            fprintf(
-                log,
-                "matrix,format,benchmark,rows,cols,nnz,num_blocks,num_threads,"
-                "duration_ms,gflops\n");
-            fflush(log);
+      return f;
+}
+
+int logger_init(const char *base_path) {
+      char path_serial[256], path_omp[256], path_cuda[256];
+
+      snprintf(path_serial, sizeof(path_serial), "%s/serial.csv", base_path);
+      snprintf(path_omp, sizeof(path_omp), "%s/omp.csv", base_path);
+      snprintf(path_cuda, sizeof(path_cuda), "%s/cuda.csv", base_path);
+
+      log_serial = open_log(path_serial, SERIAL);
+      log_omp = open_log(path_omp, OMP);
+      log_cuda = open_log(path_cuda, CUDA);
+
+      if (!log_serial || !log_omp || !log_cuda) {
+            return -1;
       }
 
       return 0;
 }
 
 void logger_close(void) {
-      if (log) {
-            fflush(log);
-            fclose(log);
-            log = NULL;
+      if (log_serial) {
+            fclose(log_serial);
+            log_serial = NULL;
+      }
+      if (log_omp) {
+            fclose(log_omp);
+            log_omp = NULL;
+      }
+      if (log_cuda) {
+            fclose(log_cuda);
+            log_cuda = NULL;
       }
 }
 
 void log_csr_serial_benchmark(const sparse_csr *A, bench res) {
-
-      if (!log) {
-            LOG_ERR("Log file not initialized");
+      if (!log_serial) {
+            LOG_ERR("Serial log not initialized");
             return;
       }
-
-      fprintf(log, "%s,CSR,serial,%d,%d,%d,,%d,%f,%f\n", A->name, A->M, A->N,
-              A->NZ, 1, res.duration_ms, res.gflops);
-      fflush(log);
+      fprintf(log_serial, "%s,CSR,%d,%d,%d,,%f,%f\n", A->name, A->M, A->N,
+              A->NZ, res.duration_ms, res.gflops);
+      fflush(log_serial);
 }
 
 void log_hll_serial_benchmark(const sparse_hll *H, bench res) {
-      if (!log) {
-            LOG_ERR("Log file not initialized");
+      if (!log_serial) {
+            LOG_ERR("Serial log not initialized");
             return;
       }
-
-      fprintf(log, "%s,HLL,serial,%d,%d,%d,%d,%d,%f,%f\n", H->name, H->M, H->N,
-              H->NZ, H->num_blocks, 1, res.duration_ms, res.gflops);
-      fflush(log);
+      fprintf(log_serial, "%s,HLL,%d,%d,%d,%d,%f,%f\n", H->name, H->M, H->N,
+              H->NZ, H->num_blocks, res.duration_ms, res.gflops);
+      fflush(log_serial);
 }
 
 void log_csr_omp_benchmark(const sparse_csr *A, bench_omp res) {
-      if (!log) {
-            LOG_ERR("Log file not initialized");
+      if (!log_omp) {
+            LOG_ERR("OMP log not initialized");
             return;
       }
-
-      fprintf(log, "%s,CSR,%s,%d,%d,%d,,%d,%f,%f\n", A->name, res.name, A->M,
-              A->N, A->NZ, res.num_threads, res.bench.duration_ms,
+      fprintf(log_omp, "%s,CSR,%s,%d,%d,%d,%d,,%f,%f\n", A->name, res.name,
+              A->M, A->N, A->NZ, res.num_threads, res.bench.duration_ms,
               res.bench.gflops);
-      fflush(log);
+      fflush(log_omp);
 }
 
 void log_hll_omp_benchmark(const sparse_hll *H, bench_omp res) {
-      if (!log) {
-            LOG_ERR("Log file not initialized");
+      if (!log_omp) {
+            LOG_ERR("OMP log not initialized");
             return;
       }
+      fprintf(log_omp, "%s,HLL,%s,%d,%d,%d,%d,%d,%f,%f\n", H->name, res.name,
+              H->M, H->N, H->NZ, H->num_blocks, res.num_threads,
+              res.bench.duration_ms, res.bench.gflops);
+      fflush(log_omp);
+}
 
-      fprintf(log, "%s,HLL,omp,%d,%d,%d,%d,%d,%f,%f\n", H->name, H->M, H->N,
-              H->NZ, H->num_blocks, res.num_threads, res.bench.duration_ms,
-              res.bench.gflops);
-      fflush(log);
+void log_csr_cuda_benchmark(const sparse_csr *A, bench res, int kernel_id) {
+      if (!log_cuda) {
+            LOG_ERR("CUDA log not initialized");
+            return;
+      }
+      fprintf(log_cuda, "%s,CSR,%d,%d,%d,%d,,%f,%f\n", A->name, kernel_id, A->M,
+              A->N, A->NZ, res.duration_ms, res.gflops);
+      fflush(log_cuda);
+}
+
+void log_hll_cuda_benchmark(const sparse_hll *H, bench res, int kernel_id) {
+      if (!log_cuda) {
+            LOG_ERR("CUDA log not initialized");
+            return;
+      }
+      fprintf(log_cuda, "%s,HLL,%d,%d,%d,%d,%d,%f,%f\n", H->name, kernel_id,
+              H->M, H->N, H->NZ, H->num_blocks, res.duration_ms, res.gflops);
+      fflush(log_cuda);
 }

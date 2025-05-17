@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/csr.h"
-#include "../include/err.h"
-#include "../include/hll.h"
-#include "../include/vector.h"
+#include "csr.h"
+#include "err.h"
+#include "hll.h"
+#include "vector.h"
 
 // The number of threads for OpenMP
 static int num_threads = 2;
