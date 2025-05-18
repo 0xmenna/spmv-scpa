@@ -243,27 +243,39 @@ static inline void run_csr_cuda_benchmarks(void) {
           bench_csr_cuda_warp_row_text,
       };
 
-      bench res;
-      for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
-            int ret = kernels[kid](A, &res);
-            if (ret) {
-                  LOG_ERR("Failed CSR CUDA [kernel %d]", kid);
-                  goto err;
-            }
+      bench_cuda benchmarks[] = {
+          {.warps_per_block = 2},
+          {.warps_per_block = 4},
+          {.warps_per_block = 8},
+      };
 
-            if (debug) {
-                  // Validate against serial result
-                  ret = validation_vec_result(expected_res, res.data);
+      for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
+            for (int i = 0; i < ARRAY_SIZE(benchmarks); ++i) {
+
+                  int ret = kernels[kid](A, &benchmarks[i]);
                   if (ret) {
-                        vec_put(&res.data);
-                        LOG_ERR("Failed validation of CSR CUDA [kernel %d]",
-                                kid);
+                        LOG_ERR(
+                            "Failed CSR CUDA [kernel %d, warps_per_block %d]",
+                            kid, benchmarks[i].warps_per_block);
                         goto err;
                   }
-            }
 
-            vec_put(&res.data);
-            log_csr_cuda_benchmark(A, res, kid);
+                  if (debug) {
+                        // Validate against serial result
+                        ret = validation_vec_result(expected_res,
+                                                    benchmarks[i].bench.data);
+                        if (ret) {
+                              vec_put(&benchmarks[i].bench.data);
+                              LOG_ERR(
+                                  "Failed validation of CSR CUDA [kernel %d]",
+                                  kid);
+                              goto err;
+                        }
+                  }
+
+                  vec_put(&benchmarks[i].bench.data);
+                  log_csr_cuda_benchmark(A, benchmarks[i], kid);
+            }
       }
       return;
 

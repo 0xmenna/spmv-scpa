@@ -30,7 +30,7 @@ typedef struct benchmark_omp {
 
 typedef struct benchmark_cuda {
       bench bench;
-      int kernel_id;
+      int warps_per_block;
 } bench_cuda;
 
 #define LOG_WARN(fmt, ...)                                                     \

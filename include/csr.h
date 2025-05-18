@@ -36,10 +36,10 @@ int bench_csr_serial(const sparse_csr *A, bench *out);
 int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out);
 int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out);
 
-int bench_csr_cuda_thread_row(const sparse_csr *A, bench *out);
-int bench_csr_cuda_warp_row(const sparse_csr *A, bench *out);
-int bench_csr_cuda_warp_row_ldg(const sparse_csr *A, bench *out);
-int bench_csr_cuda_block_row(const sparse_csr *A, bench *out);
-int bench_csr_cuda_warp_row_text(const sparse_csr *A, bench *out);
+int bench_csr_cuda_thread_row(const sparse_csr *A, bench_cuda *out);
+int bench_csr_cuda_warp_row(const sparse_csr *A, bench_cuda *out);
+int bench_csr_cuda_warp_row_ldg(const sparse_csr *A, bench_cuda *out);
+int bench_csr_cuda_block_row(const sparse_csr *A, bench_cuda *out);
+int bench_csr_cuda_warp_row_text(const sparse_csr *A, bench_cuda *out);
 
 #endif /* SPARSE_CSR_H */

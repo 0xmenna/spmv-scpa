@@ -379,22 +379,27 @@ int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
       return ret;
 }
 
-inline int bench_csr_cuda_thread_row(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_cuda_thread_row);
+inline int bench_csr_cuda_thread_row(const sparse_csr *A, bench_cuda *out) {
+      set_warps_per_block(out->warps_per_block);
+      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_thread_row);
 }
 
-inline int bench_csr_cuda_warp_row(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_cuda_warp_row);
+inline int bench_csr_cuda_warp_row(const sparse_csr *A, bench_cuda *out) {
+      set_warps_per_block(out->warps_per_block);
+      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_warp_row);
 }
 
-inline int bench_csr_cuda_warp_row_ldg(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_cuda_warp_row_ldg);
+inline int bench_csr_cuda_warp_row_ldg(const sparse_csr *A, bench_cuda *out) {
+      set_warps_per_block(out->warps_per_block);
+      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_warp_row_ldg);
 }
 
-inline int bench_csr_cuda_block_row(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_cuda_block_row);
+inline int bench_csr_cuda_block_row(const sparse_csr *A, bench_cuda *out) {
+      set_warps_per_block(out->warps_per_block);
+      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_block_row);
 }
 
-inline int bench_csr_cuda_warp_row_text(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_cuda_warp_row_text);
+inline int bench_csr_cuda_warp_row_text(const sparse_csr *A, bench_cuda *out) {
+      set_warps_per_block(out->warps_per_block);
+      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_warp_row_text);
 }

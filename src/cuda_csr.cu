@@ -8,7 +8,10 @@
 #include "cuda_timer.cuh"
 
 static constexpr int WARP_SIZE = 32;
-static constexpr int WARPS_PER_BLOCK = 8;
+
+static int warps_per_block = 4;
+
+void set_warps_per_block(int wppb) { warps_per_block = wppb; }
 
 // -----------------------------------------------------------------------------
 // Warp‐wide reduction
@@ -45,7 +48,7 @@ __global__ static void spmv_kernel_1(int M, const int *IRP, const int *JA,
                                      double *y) {
 
       int lane = threadIdx.x;
-      int row = blockIdx.x * WARPS_PER_BLOCK + threadIdx.y;
+      int row = blockIdx.x * blockDim.y + threadIdx.y;
 
       if (row >= M)
             return;
@@ -70,7 +73,7 @@ __global__ static void spmv_kernel_2(int M, const int *IRP, const int *JA,
 
       int lane = threadIdx.x;
       int warp_id = threadIdx.y;
-      int row = blockIdx.x * WARPS_PER_BLOCK + warp_id;
+      int row = blockIdx.x * blockDim.y + warp_id;
 
       if (row >= M)
             return;
@@ -100,8 +103,10 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
       int warp_id = threadIdx.y;
       int row = blockIdx.x;
 
-      // Allocate one shared slot per warp
-      __shared__ double shared_partial[WARPS_PER_BLOCK];
+      int warps_per_block = blockDim.y;
+
+      // Allocate one shared slot per each warp within a block
+      extern __shared__ double shared_partial[];
 
       int start = __ldg(&IRP[row]);
       int end = __ldg(&IRP[row + 1]);
@@ -109,7 +114,7 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
       // Divide work across warps in the block
       double local_sum = 0.0;
       for (int j = start + warp_id * WARP_SIZE + lane; j < end;
-           j += WARPS_PER_BLOCK * WARP_SIZE)
+           j += warps_per_block * WARP_SIZE)
             local_sum += AS[j] * __ldg(&x[JA[j]]);
 
       // Intra-warp reduction
@@ -124,7 +129,7 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
       // Warp 0 does the final sum
       if (warp_id == 0) {
             double final_sum =
-                (lane < WARPS_PER_BLOCK) ? shared_partial[lane] : 0.0;
+                (lane < warps_per_block) ? shared_partial[lane] : 0.0;
             final_sum = warp_reduce_sum(final_sum, lane);
             if (lane == 0) {
                   y[row] = final_sum;
@@ -141,7 +146,7 @@ __global__ static void spmv_kernel_4(int M, const int *IRP, const int *JA,
 
       int lane = threadIdx.x;
       int warp_id = threadIdx.y;
-      int row = blockIdx.x * WARPS_PER_BLOCK + warp_id;
+      int row = blockIdx.x * blockDim.y + warp_id;
 
       if (row >= M)
             return;
@@ -203,7 +208,7 @@ double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x,
       cuda_timer timer;
       timer_init(&timer);
 
-      dim3 block_dim(256);
+      dim3 block_dim(WARP_SIZE * warps_per_block);
       dim3 grid_dim((A->M + block_dim.x - 1) / block_dim.x);
 
       // Launch kernel
@@ -231,8 +236,8 @@ double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y) {
       cuda_timer timer;
       timer_init(&timer);
 
-      dim3 block_dim(WARP_SIZE, WARPS_PER_BLOCK);
-      dim3 grid_dim((A->M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK);
+      dim3 block_dim(WARP_SIZE, warps_per_block);
+      dim3 grid_dim((A->M + warps_per_block - 1) / warps_per_block);
 
       // Launch kernel
       timer_start(&timer, 0);
@@ -261,8 +266,8 @@ double csr_spmv_cuda_warp_row_ldg(const sparse_csr *A, const double *x,
       cuda_timer timer;
       timer_init(&timer);
 
-      dim3 block_dim(WARP_SIZE, WARPS_PER_BLOCK);
-      dim3 grid_dim((A->M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK);
+      dim3 block_dim(WARP_SIZE, warps_per_block);
+      dim3 grid_dim((A->M + warps_per_block - 1) / warps_per_block);
 
       // Launch kernel
       timer_start(&timer, 0);
@@ -290,12 +295,15 @@ double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x,
       cuda_timer timer;
       timer_init(&timer);
 
-      dim3 block_dim(WARP_SIZE, WARPS_PER_BLOCK);
+      dim3 block_dim(WARP_SIZE, warps_per_block);
       dim3 grid_dim(A->M);
+
+      int shared_size = warps_per_block * sizeof(double);
 
       // Launch kernel
       timer_start(&timer, 0);
-      spmv_kernel_3<<<grid_dim, block_dim>>>(A->M, d_IRP, d_JA, d_AS, d_x, d_y);
+      spmv_kernel_3<<<grid_dim, block_dim, shared_size>>>(A->M, d_IRP, d_JA,
+                                                          d_AS, d_x, d_y);
       double elapsed = timer_stop(&timer, 0);
 
       timer_destroy(&timer);
@@ -334,8 +342,8 @@ double csr_spmv_cuda_warp_row_text(const sparse_csr *A, const double *x,
       cuda_timer timer;
       timer_init(&timer);
 
-      dim3 block_dim(WARP_SIZE, WARPS_PER_BLOCK);
-      dim3 grid_dim((A->M + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK);
+      dim3 block_dim(WARP_SIZE, warps_per_block);
+      dim3 grid_dim((A->M + warps_per_block - 1) / warps_per_block);
 
       // Launch kernel
       timer_start(&timer, 0);
