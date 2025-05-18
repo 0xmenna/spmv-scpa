@@ -223,7 +223,7 @@ static void run_hll_omp_benchmarks(void) {
                                               benchmarks[i].bench.data);
                   if (ret) {
                         vec_put(&benchmarks[i].bench.data);
-                        LOG_ERR("[HLL OMP] validation failed");
+                        LOG_ERR("[HLL OMP] validation failed\n");
                         cleanup();
 
                         exit(EXIT_FAILURE);
@@ -238,9 +238,9 @@ typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench *res);
 
 static inline void run_csr_cuda_benchmarks(void) {
       csr_cuda_bench_fn kernels[] = {
-          bench_csr_cuda_thread_row,
-          bench_csr_cuda_warp_row,
-
+          bench_csr_cuda_thread_row,    bench_csr_cuda_warp_row,
+          bench_csr_cuda_warp_row_ldg,  bench_csr_cuda_block_row,
+          bench_csr_cuda_warp_row_text,
       };
 
       bench res;
@@ -250,6 +250,18 @@ static inline void run_csr_cuda_benchmarks(void) {
                   LOG_ERR("Failed CSR CUDA [kernel %d]", kid);
                   goto err;
             }
+
+            if (debug) {
+                  // Validate against serial result
+                  ret = validation_vec_result(expected_res, res.data);
+                  if (ret) {
+                        vec_put(&res.data);
+                        LOG_ERR("Failed validation of CSR CUDA [kernel %d]",
+                                kid);
+                        goto err;
+                  }
+            }
+
             vec_put(&res.data);
             log_csr_cuda_benchmark(A, res, kid);
       }

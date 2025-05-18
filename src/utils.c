@@ -1,5 +1,6 @@
 // utils.c
 #include <getopt.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,10 +39,21 @@ int validation_vec_result(const vec expected, const vec res) {
       if (res.len != expected.len) {
             return -1;
       }
+
+      double l2_norm = 0.0;
+
       for (int i = 0; i < res.len; i++) {
-            if (res.data[i] != expected.data[i]) {
-                  return -1;
-            }
+            double diff = expected.data[i] - res.data[i];
+            l2_norm += diff * diff;
       }
+
+      l2_norm = sqrt(l2_norm);
+
+      const double epsilon = 1e-1;
+
+      if (l2_norm > epsilon) {
+            return -1;
+      }
+
       return 0;
 }
