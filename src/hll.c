@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "csr.h"
+#include "cuda_hll.h"
 #include "err.h"
 #include "hll.h"
 #include "vector.h"
@@ -228,4 +229,26 @@ inline int bench_hll_omp(const sparse_hll *H, bench_omp *out) {
       num_threads = out->num_threads;
 
       return compute_benchmark_hll(H, &out->bench, hll_spmv_omp);
+}
+
+inline int bench_hll_cuda_threads_row_major(const sparse_hll *H,
+                                            bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench,
+                                   hll_spmv_cuda_threads_row_major);
+}
+
+inline int bench_hll_cuda_threads_col_major(const sparse_hll *H,
+                                            bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench,
+                                   hll_spmv_cuda_threads_col_major);
+}
+
+inline int bench_hll_cuda_warp_block(const sparse_hll *H, bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, hll_spmv_cuda_warp_block);
 }

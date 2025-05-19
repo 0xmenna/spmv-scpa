@@ -13,6 +13,7 @@ vec vec_create(size_t n) {
 
       // Be sure the caller checks for memory allocation errors
       v.data = aligned_malloc(n * sizeof *v.data);
+      memset(v.data, 0, n * sizeof(double));
       v.len = n;
 
       return v;

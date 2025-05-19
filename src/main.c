@@ -16,7 +16,8 @@ static bool debug = false;
 static bool is_logger_open = false;
 
 static sparse_csr *A = NULL;
-static sparse_hll *H = NULL;
+static sparse_hll *H_row_major = NULL;
+static sparse_hll *H_col_major = NULL;
 
 static vec expected_res = {0};
 
@@ -82,9 +83,11 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
       }
 
-      H = csr_to_hll(A, false);
-      if (IS_ERR(H)) {
-            LOG_ERR("Failed to convert CSR to HLL (err %d)", PTR_ERR(H));
+      H_row_major = csr_to_hll(A, false);
+      H_col_major = csr_to_hll(A, true);
+
+      if (IS_ERR(H_row_major) || IS_ERR(H_col_major)) {
+            LOG_ERR("Failed to convert CSR to HLL");
             cleanup();
 
             return EXIT_FAILURE;
@@ -100,8 +103,10 @@ int main(int argc, char **argv) {
 static void cleanup(void) {
       if (expected_res.data)
             vec_put(&expected_res);
-      if (H)
-            hll_free(H);
+      if (H_col_major)
+            hll_free(H_col_major);
+      if (H_row_major)
+            hll_free(H_row_major);
       if (A)
             csr_free(A);
       if (is_logger_open)
@@ -132,7 +137,7 @@ static void run_csr_serial_benchmark(void) {
 
 static void run_hll_serial_benchmark(void) {
       bench res;
-      int ret = bench_hll_serial(H, &res);
+      int ret = bench_hll_serial(H_row_major, &res);
       if (ret) {
             LOG_ERR("[HLL serial] failed with error %d", ret);
             cleanup();
@@ -140,7 +145,7 @@ static void run_hll_serial_benchmark(void) {
             exit(EXIT_FAILURE);
       }
 
-      log_hll_serial_benchmark(H, res);
+      log_hll_serial_benchmark(H_row_major, res);
 
       if (debug) {
             ret = validation_vec_result(expected_res, res.data);
@@ -207,7 +212,7 @@ static void run_hll_omp_benchmarks(void) {
 
       for (int i = 0; i < ARRAY_SIZE(benchmarks); i++) {
 
-            int ret = bench_hll_omp(H, &benchmarks[i]);
+            int ret = bench_hll_omp(H_row_major, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[HLL OMP] failed with error %d", ret);
                   cleanup();
@@ -215,7 +220,7 @@ static void run_hll_omp_benchmarks(void) {
                   exit(EXIT_FAILURE);
             }
 
-            log_hll_omp_benchmark(H, benchmarks[i]);
+            log_hll_omp_benchmark(H_row_major, benchmarks[i]);
 
             if (debug) {
                   // Validate against serial result
@@ -234,7 +239,7 @@ static void run_hll_omp_benchmarks(void) {
       }
 }
 
-typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench *res);
+typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench_cuda *out);
 
 static inline void run_csr_cuda_benchmarks(void) {
       csr_cuda_bench_fn kernels[] = {
@@ -284,6 +289,58 @@ err:
       exit(EXIT_FAILURE);
 }
 
+typedef int (*hll_cuda_bench_fn)(const sparse_hll *H, bench_cuda *out);
+
+static inline void run_hll_cuda_benchmarks(void) {
+      hll_cuda_bench_fn kernels[] = {
+          bench_hll_cuda_threads_row_major,
+          bench_hll_cuda_threads_col_major,
+          bench_hll_cuda_warp_block,
+      };
+
+      bench_cuda benchmarks[] = {
+          {.warps_per_block = 2},
+          {.warps_per_block = 4},
+          {.warps_per_block = 8},
+      };
+
+      for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
+            const sparse_hll *H = (kid == 0) ? H_row_major : H_col_major;
+
+            for (int i = 0; i < ARRAY_SIZE(benchmarks); ++i) {
+
+                  int ret = kernels[kid](H, &benchmarks[i]);
+                  if (ret) {
+                        LOG_ERR(
+                            "Failed HLL CUDA [kernel %d, warps_per_block %d]",
+                            kid, benchmarks[i].warps_per_block);
+                        goto err;
+                  }
+
+                  if (debug) {
+                        // Validate against serial result
+                        ret = validation_vec_result(expected_res,
+                                                    benchmarks[i].bench.data);
+                        if (ret) {
+                              vec_put(&benchmarks[i].bench.data);
+                              LOG_ERR("Failed validation of HLL CUDA [kernel "
+                                      "%d, warps_per_block %d]",
+                                      kid, benchmarks[i].warps_per_block);
+                              goto err;
+                        }
+                  }
+
+                  vec_put(&benchmarks[i].bench.data);
+                  log_hll_cuda_benchmark(H, benchmarks[i], kid);
+            }
+      }
+      return;
+
+err:
+      cleanup();
+      exit(EXIT_FAILURE);
+}
+
 static inline void run_benchmarks(void) {
 
       run_csr_serial_benchmark();
@@ -297,4 +354,6 @@ static inline void run_benchmarks(void) {
       run_hll_omp_benchmarks();
 
       run_csr_cuda_benchmarks();
+
+      run_hll_cuda_benchmarks();
 }

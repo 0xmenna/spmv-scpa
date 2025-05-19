@@ -11,7 +11,7 @@ static constexpr int WARP_SIZE = 32;
 
 static int warps_per_block = 4;
 
-void set_warps_per_block(int wppb) { warps_per_block = wppb; }
+void set_csr_warps_per_block(int wppb) { warps_per_block = wppb; }
 
 // -----------------------------------------------------------------------------
 // Warp‐wide reduction

@@ -60,4 +60,8 @@ int bench_hll_serial(const sparse_hll *H, bench *out);
 
 int bench_hll_omp(const sparse_hll *H, bench_omp *out);
 
+int bench_hll_cuda_threads_row_major(const sparse_hll *H, bench_cuda *out);
+int bench_hll_cuda_threads_col_major(const sparse_hll *H, bench_cuda *out);
+int bench_hll_cuda_warp_block(const sparse_hll *H, bench_cuda *out);
+
 #endif /* SPARSE_HLL_H */

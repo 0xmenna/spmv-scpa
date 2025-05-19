@@ -7,7 +7,7 @@ extern "C" {
 
 #include "csr.h"
 
-void set_warps_per_block(int wppb);
+void set_csr_warps_per_block(int wppb);
 
 double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x,
                                 double *y);
