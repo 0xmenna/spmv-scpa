@@ -243,9 +243,9 @@ typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench_cuda *out);
 
 static inline void run_csr_cuda_benchmarks(void) {
       csr_cuda_bench_fn kernels[] = {
-          bench_csr_cuda_thread_row,    bench_csr_cuda_warp_row,
-          bench_csr_cuda_warp_row_ldg,  bench_csr_cuda_block_row,
-          bench_csr_cuda_warp_row_text,
+          bench_csr_cuda_thread_row,        bench_csr_cuda_warp_row,
+          bench_csr_cuda_halfwarp_row,      bench_csr_cuda_block_row,
+          bench_csr_cuda_halfwarp_row_text,
       };
 
       bench_cuda benchmarks[] = {
@@ -296,6 +296,7 @@ static inline void run_hll_cuda_benchmarks(void) {
           bench_hll_cuda_threads_row_major,
           bench_hll_cuda_threads_col_major,
           bench_hll_cuda_warp_block,
+          bench_hll_cuda_halfwarp_row,
       };
 
       bench_cuda benchmarks[] = {
@@ -305,7 +306,8 @@ static inline void run_hll_cuda_benchmarks(void) {
       };
 
       for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
-            const sparse_hll *H = (kid == 0) ? H_row_major : H_col_major;
+            const sparse_hll *H =
+                (kid == 0 || kid == 3) ? H_row_major : H_col_major;
 
             for (int i = 0; i < ARRAY_SIZE(benchmarks); ++i) {
 

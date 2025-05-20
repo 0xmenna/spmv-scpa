@@ -18,6 +18,9 @@ double hll_spmv_cuda_threads_col_major(const sparse_hll *H, const double *x,
 double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x,
                                 double *y);
 
+double hll_spmv_cuda_halfwarp_row(const sparse_hll *H, const double *x,
+                                  double *y);
+
 #ifdef __cplusplus
 }
 #endif

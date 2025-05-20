@@ -14,16 +14,6 @@ static int warps_per_block = 4;
 void set_csr_warps_per_block(int wppb) { warps_per_block = wppb; }
 
 // -----------------------------------------------------------------------------
-// Warp‐wide reduction
-// ------------------------------------------------
-__inline__ __device__ double warp_reduce_sum(double val, int lane) {
-      for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1) {
-            val += __shfl_sync(0xFFFFFFFF, val, lane + offset);
-      }
-      return val;
-}
-
-// -----------------------------------------------------------------------------
 // Kernel 0: 1 thread → 1 row
 // ---------------------------------------------------
 __global__ static void spmv_kernel_0(int M, int *IRP, int *JA, double *AS,
@@ -59,37 +49,44 @@ __global__ static void spmv_kernel_1(int M, const int *IRP, const int *JA,
       for (int j = start + lane; j < end; j += WARP_SIZE) {
             sum += AS[j] * x[JA[j]];
       }
-      sum = warp_reduce_sum(sum, lane);
+      for (int offset = WARP_SIZE >> 1; offset > 0; offset >>= 1)
+            sum += __shfl_sync(0xFFFFFFFF, sum, lane + offset);
+
       if (lane == 0)
             y[row] = sum;
 }
 
 // -----------------------------------------------------------------------------
-// Kernel 2: 1 warp → 1 row. Uses __ldg
+// Kernel 2: half warp → 1 row.
 // ---------------------------------------------------
-__global__ static void spmv_kernel_2(int M, const int *IRP, const int *JA,
-                                     const double *AS, const double *x,
-                                     double *y) {
+__global__ void spmv_kernel_2(int M, const int *IRP, const int *JA,
+                              const double *AS, const double *x, double *y) {
+      int lane = threadIdx.x;           // 0..31
+      int warp_local = threadIdx.y;     // Warp index in block
+      int halfwarp_in_warp = lane >> 4; // 0 or 1
+      int halfwarp_local = lane & 15;   // 0..15
 
-      int lane = threadIdx.x;
-      int warp_id = threadIdx.y;
-      int row = blockIdx.x * blockDim.y + warp_id;
-
-      if (row >= M)
+      // Global half-warp ID
+      int halfwarp_id =
+          (blockIdx.x * blockDim.y + warp_local) * 2 + halfwarp_in_warp;
+      if (halfwarp_id >= M)
             return;
 
+      int row = halfwarp_id;
       int start = __ldg(&IRP[row]);
       int end = __ldg(&IRP[row + 1]);
 
       double sum = 0.0;
-      for (int j = start + lane; j < end; j += WARP_SIZE) {
+      for (int j = start + halfwarp_local; j < end; j += 16)
             sum += AS[j] * __ldg(&x[JA[j]]);
-      }
 
-      sum = warp_reduce_sum(sum, lane);
-      if (lane == 0) {
+      // Half-warp reduction (only among 16 threads)
+      for (int offset = 8; offset > 0; offset >>= 1)
+            sum += __shfl_sync(0xFFFF, sum, lane + offset, 16);
+
+      // First thread of the half-warp writes result
+      if (halfwarp_local == 0)
             y[row] = sum;
-      }
 }
 
 // -----------------------------------------------------------------------------
@@ -118,7 +115,8 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
             local_sum += AS[j] * __ldg(&x[JA[j]]);
 
       // Intra-warp reduction
-      local_sum = warp_reduce_sum(local_sum, lane);
+      for (int offset = WARP_SIZE >> 1; offset > 0; offset >>= 1)
+            local_sum += __shfl_sync(0xFFFFFFFF, local_sum, lane + offset);
 
       // One thread per warp writes to shared memory
       if (lane == 0) {
@@ -130,7 +128,11 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
       if (warp_id == 0) {
             double final_sum =
                 (lane < warps_per_block) ? shared_partial[lane] : 0.0;
-            final_sum = warp_reduce_sum(final_sum, lane);
+
+            for (int offset = WARP_SIZE >> 1; offset > 0; offset >>= 1)
+                  final_sum +=
+                      __shfl_sync(0xFFFFFFFF, final_sum, lane + offset);
+
             if (lane == 0) {
                   y[row] = final_sum;
             }
@@ -138,24 +140,29 @@ __global__ void spmv_kernel_3(int M, const int *IRP, const int *JA,
 }
 
 // -----------------------------------------------------------------------------
-// Kernel 4: 1 warp → 1 row. Exploits texture cache for x.
+// Kernel 4: half warp → 1 row. Exploits texture cache for x.
 // ---------------------------------------------------
 __global__ static void spmv_kernel_4(int M, const int *IRP, const int *JA,
                                      const double *AS,
                                      cudaTextureObject_t tex_x, double *y) {
 
       int lane = threadIdx.x;
-      int warp_id = threadIdx.y;
-      int row = blockIdx.x * blockDim.y + warp_id;
+      int warp_local = threadIdx.y;
+      int halfwarp_in_warp = lane >> 4;
+      int halfwarp_local = lane & 15;
 
-      if (row >= M)
+      // Global half-warp ID
+      int halfwarp_id =
+          (blockIdx.x * blockDim.y + warp_local) * 2 + halfwarp_in_warp;
+      if (halfwarp_id >= M)
             return;
 
+      int row = halfwarp_id;
       int start = __ldg(&IRP[row]);
       int end = __ldg(&IRP[row + 1]);
 
       double sum = 0.0;
-      for (int j = start + lane; j < end; j += WARP_SIZE) {
+      for (int j = start + halfwarp_local; j < end; j += 16) {
             int2 x_val_i2 = tex1Dfetch<int2>(tex_x, JA[j]);
             double x_val = __longlong_as_double(
                 (static_cast<long long>(x_val_i2.y) << 32) |
@@ -163,8 +170,10 @@ __global__ static void spmv_kernel_4(int M, const int *IRP, const int *JA,
             sum += AS[j] * x_val;
       }
 
-      sum = warp_reduce_sum(sum, lane);
-      if (lane == 0)
+      for (int offset = 8; offset > 0; offset >>= 1)
+            sum += __shfl_sync(0xFFFF, sum, lane + offset, 16);
+
+      if (halfwarp_local == 0)
             y[row] = sum;
 }
 
@@ -253,10 +262,9 @@ double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y) {
 }
 
 // -----------------------------------------------------------------------------
-// Host 3: warp‐per‐row: uses load-global to read x to improve read
-// performance
+// Host 3: half-warp‐per‐row
 // ---------------------------------------------------------
-double csr_spmv_cuda_warp_row_ldg(const sparse_csr *A, const double *x,
+double csr_spmv_cuda_halfwarp_row(const sparse_csr *A, const double *x,
                                   double *y) {
       // Memory setup
       int *d_IRP, *d_JA;
@@ -267,7 +275,7 @@ double csr_spmv_cuda_warp_row_ldg(const sparse_csr *A, const double *x,
       timer_init(&timer);
 
       dim3 block_dim(WARP_SIZE, warps_per_block);
-      dim3 grid_dim((A->M + warps_per_block - 1) / warps_per_block);
+      dim3 grid_dim((A->M + (warps_per_block * 2) - 1) / (warps_per_block * 2));
 
       // Launch kernel
       timer_start(&timer, 0);
@@ -315,10 +323,10 @@ double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x,
 }
 
 // -----------------------------------------------------------------------------
-// Host 5: warp‐per‐row: exploits texture cache for x
+// Host 5: half-warp‐per‐row: exploits texture cache for x
 // ---------------------------------------------------------
-double csr_spmv_cuda_warp_row_text(const sparse_csr *A, const double *x,
-                                   double *y) {
+double csr_spmv_cuda_halfwarp_row_text(const sparse_csr *A, const double *x,
+                                       double *y) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;
@@ -343,7 +351,7 @@ double csr_spmv_cuda_warp_row_text(const sparse_csr *A, const double *x,
       timer_init(&timer);
 
       dim3 block_dim(WARP_SIZE, warps_per_block);
-      dim3 grid_dim((A->M + warps_per_block - 1) / warps_per_block);
+      dim3 grid_dim((A->M + (warps_per_block * 2) - 1) / (warps_per_block * 2));
 
       // Launch kernel
       timer_start(&timer, 0);

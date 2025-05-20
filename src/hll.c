@@ -148,9 +148,8 @@ static inline double hll_spmv_serial(const sparse_hll *H, const double *x,
                   int off = i * max_NZ;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk->JA[off + j];
-                        if (c < 0)
-                              break;
-                        sum += blk->AS[off + j] * x[c];
+                        if (c != -1)
+                              sum += blk->AS[off + j] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -174,9 +173,8 @@ static inline double _hll_spmv_serial_col_major(const sparse_hll *H,
                   double sum = 0.0;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk->JA[j * M + i];
-                        if (c < 0)
-                              break;
-                        sum += blk->AS[j * M + i] * x[c];
+                        if (c != -1)
+                              sum += blk->AS[j * M + i] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -207,9 +205,8 @@ static inline double hll_spmv_omp(const sparse_hll *restrict H,
                   int off = i * max_NZ;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk.JA[off + j];
-                        if (c < 0)
-                              break;
-                        sum += blk.AS[off + j] * x[c];
+                        if (c != -1)
+                              sum += blk.AS[off + j] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -251,4 +248,10 @@ inline int bench_hll_cuda_warp_block(const sparse_hll *H, bench_cuda *out) {
       set_hll_warps_per_block(out->warps_per_block);
 
       return compute_benchmark_hll(H, &out->bench, hll_spmv_cuda_warp_block);
+}
+
+inline int bench_hll_cuda_halfwarp_row(const sparse_hll *H, bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, hll_spmv_cuda_halfwarp_row);
 }

@@ -14,16 +14,6 @@ static int warps_per_block = 4;
 void set_hll_warps_per_block(int wppb) { warps_per_block = wppb; }
 
 // -----------------------------------------------------------------------------
-// Warp‐wide reduction
-// ------------------------------------------------
-__inline__ __device__ double warp_reduce_sum(double val, int lane) {
-      for (int offset = WARP_SIZE / 2; offset > 0; offset >>= 1) {
-            val += __shfl_sync(0xFFFFFFFF, val, lane + offset);
-      }
-      return val;
-}
-
-// -----------------------------------------------------------------------------
 // Kernel 0: Assign each thread to a row within a block (uses row-major storage)
 // ---------------------------------------------------
 __global__ static void spmv_kernel_0(int M, int hack_size,
@@ -46,10 +36,8 @@ __global__ static void spmv_kernel_0(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = off + j;
             int col = blk.JA[idx];
-            if (col < 0)
-                  break;
-            double val = blk.AS[idx];
-            sum += val * x[col];
+            if (col != -1)
+                  sum += blk.AS[idx] * x[col];
       }
 
       y[tid] = sum;
@@ -78,10 +66,8 @@ __global__ static void spmv_kernel_1(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = j * blk.M + row_in_block;
             int col = blk.JA[idx];
-            if (col < 0)
-                  break;
-            double val = blk.AS[idx];
-            sum += val * x[col];
+            if (col != -1)
+                  sum += blk.AS[idx] * x[col];
       }
 
       y[tid] = sum;
@@ -113,13 +99,60 @@ __global__ static void spmv_kernel_2(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = j * blk.M + lane;
             int col = blk.JA[idx];
-            if (col < 0)
-                  break;
-            double val = blk.AS[idx];
-            sum += val * __ldg(&x[col]);
+            if (col != -1)
+                  sum += blk.AS[idx] * __ldg(&x[col]);
       }
 
       y[warp_id * hack_size + lane] = sum;
+}
+
+// -----------------------------------------------------------------------------
+// Kernel 3: Assign half warp to one row within a block (using row-major for
+// colaesced accesses)
+// ---------------------------------------------------
+__global__ static void spmv_kernel_3(int M, int hack_size,
+                                     const ellpack_block *blocks,
+                                     int num_blocks, const double *x,
+                                     double *y) {
+
+      int lane = threadIdx.x;
+      int warp_local = threadIdx.y;
+      int halfwarp_in_warp = lane >> 4; // 0 or 1
+
+      // Global half-warp ID across the grid. It correspods to the global matrix
+      // row
+      int halfwarp_id_global =
+          ((blockIdx.x * blockDim.y + warp_local) << 1) + halfwarp_in_warp;
+
+      if (halfwarp_id_global >= M)
+            return;
+
+      // Determine which row of which block to compute
+      int block_id = halfwarp_id_global / hack_size;
+      int row_in_block = halfwarp_id_global % hack_size;
+
+      const ellpack_block blk = blocks[block_id];
+      int off = row_in_block * blk.max_NZ;
+
+      int half_lane = lane & 15;
+
+      // Cooperative row processing with half warp
+      double sum = 0.0;
+      for (int j = half_lane; j < blk.max_NZ; j += 16) {
+            int idx = off + j;
+            int col = blk.JA[idx];
+            if (col != -1)
+                  sum += blk.AS[idx] * __ldg(&x[col]);
+      }
+
+      // Reduction across half-warp
+      for (int offset = 8; offset > 0; offset >>= 1)
+            sum += __shfl_sync(0xFFFF, sum, lane + offset, 16);
+
+      // Only first thread in half-warp writes the result
+      if (half_lane == 0) {
+            y[halfwarp_id_global] = sum;
+      }
 }
 
 static void spmv_cuda_up(const sparse_hll *H, const double *x,
@@ -251,6 +284,36 @@ double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x,
       // Launch kernel
       timer_start(&timer, 0);
       spmv_kernel_2<<<grid_dim, block_dim>>>(H->M, H->hack_size, d_blocks,
+                                             H->num_blocks, d_x, d_y);
+      double elapsed = timer_stop(&timer, 0);
+
+      timer_destroy(&timer);
+
+      // Copy back to host and cleanup
+      spmv_cuda_down(y, H->M, d_blocks, H->num_blocks, d_x, d_y);
+
+      return elapsed;
+}
+
+// -----------------------------------------------------------------------------
+// Host 3: Each half-warp is assigned to a row (uses row-major for coalesced)
+// -------------------------------------------------------
+double hll_spmv_cuda_halfwarp_row(const sparse_hll *H, const double *x,
+                                  double *y) {
+      // Memory setup
+      ellpack_block *d_blocks;
+      double *d_x, *d_y;
+      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y);
+
+      cuda_timer timer;
+      timer_init(&timer);
+
+      dim3 block_dim(WARP_SIZE, warps_per_block);
+      dim3 grid_dim((H->M + warps_per_block * 2 - 1) / (warps_per_block * 2));
+
+      // Launch kernel
+      timer_start(&timer, 0);
+      spmv_kernel_3<<<grid_dim, block_dim>>>(H->M, H->hack_size, d_blocks,
                                              H->num_blocks, d_x, d_y);
       double elapsed = timer_stop(&timer, 0);
 
