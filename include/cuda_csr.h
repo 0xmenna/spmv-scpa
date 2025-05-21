@@ -7,10 +7,22 @@ extern "C" {
 
 #include "csr.h"
 
-double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x,
-                                double *y);
+void set_csr_warps_per_block(int wppb);
 
-double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y);
+double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x, double *y,
+                                void *_unused);
+
+double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y,
+                              void *_unused);
+
+double csr_spmv_cuda_halfwarp_row(const sparse_csr *A, const double *x,
+                                  double *y, void *_unused);
+
+double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x, double *y,
+                               void *_unused);
+
+double csr_spmv_cuda_halfwarp_row_text(const sparse_csr *A, const double *x,
+                                       double *y, void *_unused);
 
 #ifdef __cplusplus
 }

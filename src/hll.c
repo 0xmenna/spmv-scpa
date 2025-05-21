@@ -7,12 +7,10 @@
 #include <string.h>
 
 #include "csr.h"
+#include "cuda_hll.h"
 #include "err.h"
 #include "hll.h"
 #include "vector.h"
-
-// The number of threads for OpenMP
-static int num_threads = 2;
 
 /**
  * Convert a CSR matrix into a HLL matrix.
@@ -107,14 +105,15 @@ void hll_free(sparse_hll *H) {
       free(H);
 }
 
-static int compute_benchmark_hll(const sparse_hll *H, bench *out,
+static int compute_benchmark_hll(const sparse_hll *H, bench *out, void *add_arg,
                                  double (*spmv_f)(const sparse_hll *H,
-                                                  const double *x, double *y)) {
+                                                  const double *x, double *y,
+                                                  void *add_arg)) {
       vec x = vec_create(H->N);
       if (!x.data)
             return -ENOMEM;
 
-      vec_fill(&x, 1.0);
+      vec_fill_random(&x);
 
       vec y = vec_create(H->M);
       if (!y.data) {
@@ -122,7 +121,7 @@ static int compute_benchmark_hll(const sparse_hll *H, bench *out,
             return -ENOMEM;
       }
 
-      double duration = spmv_f(H, x.data, y.data);
+      double duration = spmv_f(H, x.data, y.data, add_arg);
 
       vec_put(&x);
 
@@ -134,7 +133,7 @@ static int compute_benchmark_hll(const sparse_hll *H, bench *out,
 }
 
 static inline double hll_spmv_serial(const sparse_hll *H, const double *x,
-                                     double *y) {
+                                     double *y, void *_unused) {
       double start = now();
       for (int b = 0; b < H->num_blocks; b++) {
             const ellpack_block *blk = &H->blocks[b];
@@ -147,9 +146,8 @@ static inline double hll_spmv_serial(const sparse_hll *H, const double *x,
                   int off = i * max_NZ;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk->JA[off + j];
-                        if (c < 0)
-                              break;
-                        sum += blk->AS[off + j] * x[c];
+                        if (c != -1)
+                              sum += blk->AS[off + j] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -160,7 +158,8 @@ static inline double hll_spmv_serial(const sparse_hll *H, const double *x,
 }
 
 static inline double _hll_spmv_serial_col_major(const sparse_hll *H,
-                                                const double *x, double *y) {
+                                                const double *x, double *y,
+                                                void *_unused) {
 
       double start = now();
       for (int b = 0; b < H->num_blocks; b++) {
@@ -173,9 +172,8 @@ static inline double _hll_spmv_serial_col_major(const sparse_hll *H,
                   double sum = 0.0;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk->JA[j * M + i];
-                        if (c < 0)
-                              break;
-                        sum += blk->AS[j * M + i] * x[c];
+                        if (c != -1)
+                              sum += blk->AS[j * M + i] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -186,8 +184,10 @@ static inline double _hll_spmv_serial_col_major(const sparse_hll *H,
 }
 
 static inline double hll_spmv_omp(const sparse_hll *restrict H,
-                                  const double *restrict x,
-                                  double *restrict y) {
+                                  const double *restrict x, double *restrict y,
+                                  void *add_arg) {
+
+      int num_threads = *(int *)add_arg;
 
       assert(num_threads <= omp_get_max_threads());
 
@@ -206,9 +206,8 @@ static inline double hll_spmv_omp(const sparse_hll *restrict H,
                   int off = i * max_NZ;
                   for (int j = 0; j < max_NZ; j++) {
                         int c = blk.JA[off + j];
-                        if (c < 0)
-                              break;
-                        sum += blk.AS[off + j] * x[c];
+                        if (c != -1)
+                              sum += blk.AS[off + j] * x[c];
                   }
                   y[base + i] = sum;
             }
@@ -221,11 +220,43 @@ static inline double hll_spmv_omp(const sparse_hll *restrict H,
 
 // Run HLL SpMV serial benchmark
 inline int bench_hll_serial(const sparse_hll *H, bench *out) {
-      return compute_benchmark_hll(H, out, hll_spmv_serial);
+      return compute_benchmark_hll(H, out, NULL, hll_spmv_serial);
 }
 
 inline int bench_hll_omp(const sparse_hll *H, bench_omp *out) {
-      num_threads = out->num_threads;
 
-      return compute_benchmark_hll(H, &out->bench, hll_spmv_omp);
+      snprintf(out->name, sizeof(out->name), "omp_guided");
+
+      return compute_benchmark_hll(H, &out->bench, &out->num_threads,
+                                   hll_spmv_omp);
+}
+
+inline int bench_hll_cuda_threads_row_major(const sparse_hll *H,
+                                            bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, NULL,
+                                   hll_spmv_cuda_threads_row_major);
+}
+
+inline int bench_hll_cuda_threads_col_major(const sparse_hll *H,
+                                            bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, NULL,
+                                   hll_spmv_cuda_threads_col_major);
+}
+
+inline int bench_hll_cuda_warp_block(const sparse_hll *H, bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, NULL,
+                                   hll_spmv_cuda_warp_block);
+}
+
+inline int bench_hll_cuda_halfwarp_row(const sparse_hll *H, bench_cuda *out) {
+      set_hll_warps_per_block(out->warps_per_block);
+
+      return compute_benchmark_hll(H, &out->bench, NULL,
+                                   hll_spmv_cuda_halfwarp_row);
 }

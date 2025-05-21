@@ -1,3 +1,0 @@
-cage4 https://suitesparse-collection-website.herokuapp.com/MM/vanHeukelum/cage4.tar.gz
-mhda416 https://suitesparse-collection-website.herokuapp.com/MM/Bai/mhda416.tar.gz
-mcfe https://suitesparse-collection-website.herokuapp.com/MM/HB/mcfe.tar.gz

@@ -13,6 +13,7 @@ vec vec_create(size_t n) {
 
       // Be sure the caller checks for memory allocation errors
       v.data = aligned_malloc(n * sizeof *v.data);
+      memset(v.data, 0, n * sizeof(double));
       v.len = n;
 
       return v;
@@ -30,4 +31,11 @@ void vec_fill(vec *v, double value) {
             return;
       for (size_t i = 0; i < v->len; i++)
             v->data[i] = value;
+}
+
+void vec_fill_random(vec *v) {
+      if (!v || !v->data)
+            return;
+      for (size_t i = 0; i < v->len; i++)
+            v->data[i] = (double)rand() / RAND_MAX;
 }

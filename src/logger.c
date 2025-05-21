@@ -36,7 +36,8 @@ static FILE *open_log(const char *path, const enum LOGGER_TYPE type) {
                              "num_threads,duration_ms,gflops\n");
                   break;
             case CUDA:
-                  fprintf(f, "matrix,format,kernel,rows,cols,nnz,num_blocks,"
+                  fprintf(f, "matrix,format,kernel,warps_per_block,rows,cols,"
+                             "nnz,num_blocks,"
                              "duration_ms,gflops\n");
                   break;
             default:
@@ -110,7 +111,7 @@ void log_csr_omp_benchmark(const sparse_csr *A, bench_omp res) {
             LOG_ERR("OMP log not initialized");
             return;
       }
-      fprintf(log_omp, "%s,CSR,%s,%d,%d,%d,%d,,%f,%f\n", A->name, res.name,
+      fprintf(log_omp, "%s,CSR,%s,%d,%d,%d,,%d,%f,%f\n", A->name, res.name,
               A->M, A->N, A->NZ, res.num_threads, res.bench.duration_ms,
               res.bench.gflops);
       fflush(log_omp);
@@ -127,22 +128,26 @@ void log_hll_omp_benchmark(const sparse_hll *H, bench_omp res) {
       fflush(log_omp);
 }
 
-void log_csr_cuda_benchmark(const sparse_csr *A, bench res, int kernel_id) {
+void log_csr_cuda_benchmark(const sparse_csr *A, bench_cuda res,
+                            int kernel_id) {
       if (!log_cuda) {
             LOG_ERR("CUDA log not initialized");
             return;
       }
-      fprintf(log_cuda, "%s,CSR,%d,%d,%d,%d,,%f,%f\n", A->name, kernel_id, A->M,
-              A->N, A->NZ, res.duration_ms, res.gflops);
+      fprintf(log_cuda, "%s,CSR,%d,%d,%d,%d,%d,,%f,%f\n", A->name, kernel_id,
+              res.warps_per_block, A->M, A->N, A->NZ, res.bench.duration_ms,
+              res.bench.gflops);
       fflush(log_cuda);
 }
 
-void log_hll_cuda_benchmark(const sparse_hll *H, bench res, int kernel_id) {
+void log_hll_cuda_benchmark(const sparse_hll *H, bench_cuda res,
+                            int kernel_id) {
       if (!log_cuda) {
             LOG_ERR("CUDA log not initialized");
             return;
       }
-      fprintf(log_cuda, "%s,HLL,%d,%d,%d,%d,%d,%f,%f\n", H->name, kernel_id,
-              H->M, H->N, H->NZ, H->num_blocks, res.duration_ms, res.gflops);
+      fprintf(log_cuda, "%s,HLL,%d,%d,%d,%d,%d,%d,%f,%f\n", H->name, kernel_id,
+              res.warps_per_block, H->M, H->N, H->NZ, H->num_blocks,
+              res.bench.duration_ms, res.bench.gflops);
       fflush(log_cuda);
 }
