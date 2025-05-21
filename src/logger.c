@@ -111,7 +111,7 @@ void log_csr_omp_benchmark(const sparse_csr *A, bench_omp res) {
             LOG_ERR("OMP log not initialized");
             return;
       }
-      fprintf(log_omp, "%s,CSR,%s,%d,%d,%d,%d,,%f,%f\n", A->name, res.name,
+      fprintf(log_omp, "%s,CSR,%s,%d,%d,%d,,%d,%f,%f\n", A->name, res.name,
               A->M, A->N, A->NZ, res.num_threads, res.bench.duration_ms,
               res.bench.gflops);
       fflush(log_omp);

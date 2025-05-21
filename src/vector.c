@@ -32,3 +32,10 @@ void vec_fill(vec *v, double value) {
       for (size_t i = 0; i < v->len; i++)
             v->data[i] = value;
 }
+
+void vec_fill_random(vec *v) {
+      if (!v || !v->data)
+            return;
+      for (size_t i = 0; i < v->len; i++)
+            v->data[i] = (double)rand() / RAND_MAX;
+}

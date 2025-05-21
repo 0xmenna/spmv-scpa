@@ -15,11 +15,6 @@
 #include "utils.h"
 #include "vector.h"
 
-// The number of threads for OpenMP
-static int num_threads = 2;
-// The thread partitions for load balancing in OpenMP
-static int *partitions = NULL;
-
 void extract_matrix_name(const char *path, char *name_out) {
       const char *base = strrchr(path, '/');
       base = (base) ? base + 1 : path;
@@ -184,14 +179,15 @@ void csr_free(sparse_csr *A) {
       free(A);
 }
 
-static int compute_benchmark_csr(const sparse_csr *A, bench *out,
+static int compute_benchmark_csr(const sparse_csr *A, bench *out, void *add_arg,
                                  double (*spmv_f)(const sparse_csr *A,
-                                                  const double *x, double *y)) {
+                                                  const double *x, double *y,
+                                                  void *add_ardg)) {
       vec x = vec_create(A->N);
       if (!x.data)
             return -ENOMEM;
 
-      vec_fill(&x, 1.0);
+      vec_fill_random(&x);
 
       vec y = vec_create(A->M);
       if (!y.data) {
@@ -199,7 +195,7 @@ static int compute_benchmark_csr(const sparse_csr *A, bench *out,
             return -ENOMEM;
       }
 
-      double duration = spmv_f(A, x.data, y.data);
+      double duration = spmv_f(A, x.data, y.data, add_arg);
 
       vec_put(&x);
 
@@ -211,7 +207,7 @@ static int compute_benchmark_csr(const sparse_csr *A, bench *out,
 }
 
 static inline double csr_spmv_serial(const sparse_csr *A, const double *x,
-                                     double *y) {
+                                     double *y, void *_unused) {
 
       double start = now();
       for (int i = 0; i < A->M; i++) {
@@ -288,8 +284,10 @@ static int *partition_csr_rows(const sparse_csr *A, int *num_threads) {
 }
 
 static double csr_spmv_omp_guided(const sparse_csr *restrict A,
-                                  const double *restrict x,
-                                  double *restrict y) {
+                                  const double *restrict x, double *restrict y,
+                                  void *add_arg) {
+
+      int num_threads = *(int *)add_arg;
 
       double start = omp_get_wtime();
 
@@ -307,14 +305,25 @@ static double csr_spmv_omp_guided(const sparse_csr *restrict A,
       return (end - start) * 1e3;
 }
 
+struct omp_nnz_balancing_arg {
+      int num_threads;
+      int *partitions;
+};
+
 static double csr_spmv_omp_nnz_balancing(const sparse_csr *restrict A,
                                          const double *restrict x,
-                                         double *restrict y) {
+                                         double *restrict y, void *add_arg) {
 
       // Ensure input arrays are cache-line aligned
       assert(((uintptr_t)A->AS % ALIGNMENT) == 0);
       assert(((uintptr_t)A->JA % ALIGNMENT) == 0);
       assert(((uintptr_t)x % ALIGNMENT) == 0);
+
+      struct omp_nnz_balancing_arg *arg =
+          (struct omp_nnz_balancing_arg *)add_arg;
+
+      int num_threads = arg->num_threads;
+      int *partitions = arg->partitions;
 
       assert(num_threads <= omp_get_max_threads());
 
@@ -339,36 +348,34 @@ static double csr_spmv_omp_nnz_balancing(const sparse_csr *restrict A,
 
 // Run CSR SpMV serial benchmark
 inline int bench_csr_serial(const sparse_csr *A, bench *out) {
-      return compute_benchmark_csr(A, out, csr_spmv_serial);
+      return compute_benchmark_csr(A, out, NULL, csr_spmv_serial);
 }
 
 // Run CSR SpMV OpenMP benchmark (guided scheduling)
 int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out) {
-      int ret;
-
-      num_threads = out->num_threads;
-
-      ret = compute_benchmark_csr(A, &out->bench, csr_spmv_omp_guided);
 
       snprintf(out->name, sizeof(out->name), "omp_guided");
 
-      return ret;
+      return compute_benchmark_csr(A, &out->bench, &out->num_threads,
+                                   csr_spmv_omp_guided);
 }
 
 // Run CSR SpMV OpenMP benchmark (schduled based on nnz)
 int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
       int ret;
 
-      // Ensure we cleaned any previous partitions
-      assert(partitions == NULL);
-
-      partitions = partition_csr_rows(A, &out->num_threads);
+      int *partitions = partition_csr_rows(A, &out->num_threads);
       if (IS_ERR(partitions)) {
             return PTR_ERR(partitions);
       }
-      num_threads = out->num_threads;
 
-      ret = compute_benchmark_csr(A, &out->bench, csr_spmv_omp_nnz_balancing);
+      struct omp_nnz_balancing_arg arg = {
+          .num_threads = out->num_threads,
+          .partitions = partitions,
+      };
+
+      ret = compute_benchmark_csr(A, &out->bench, &arg,
+                                  csr_spmv_omp_nnz_balancing);
 
       // Clean up partitions
       free(partitions);
@@ -381,27 +388,31 @@ int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out) {
 
 inline int bench_csr_cuda_thread_row(const sparse_csr *A, bench_cuda *out) {
       set_csr_warps_per_block(out->warps_per_block);
-      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_thread_row);
+      return compute_benchmark_csr(A, &out->bench, NULL,
+                                   csr_spmv_cuda_thread_row);
 }
 
 inline int bench_csr_cuda_warp_row(const sparse_csr *A, bench_cuda *out) {
       set_csr_warps_per_block(out->warps_per_block);
-      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_warp_row);
+      return compute_benchmark_csr(A, &out->bench, NULL,
+                                   csr_spmv_cuda_warp_row);
 }
 
 inline int bench_csr_cuda_halfwarp_row(const sparse_csr *A, bench_cuda *out) {
       set_csr_warps_per_block(out->warps_per_block);
-      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_halfwarp_row);
+      return compute_benchmark_csr(A, &out->bench, NULL,
+                                   csr_spmv_cuda_halfwarp_row);
 }
 
 inline int bench_csr_cuda_block_row(const sparse_csr *A, bench_cuda *out) {
       set_csr_warps_per_block(out->warps_per_block);
-      return compute_benchmark_csr(A, &out->bench, csr_spmv_cuda_block_row);
+      return compute_benchmark_csr(A, &out->bench, NULL,
+                                   csr_spmv_cuda_block_row);
 }
 
 inline int bench_csr_cuda_halfwarp_row_text(const sparse_csr *A,
                                             bench_cuda *out) {
       set_csr_warps_per_block(out->warps_per_block);
-      return compute_benchmark_csr(A, &out->bench,
+      return compute_benchmark_csr(A, &out->bench, NULL,
                                    csr_spmv_cuda_halfwarp_row_text);
 }

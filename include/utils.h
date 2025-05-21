@@ -1,6 +1,7 @@
 #ifndef JSON_UTILS_H
 #define JSON_UTILS_H
 
+#include <omp.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,6 +16,18 @@
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define MAX_NAME 64
+
+#define OMP_WARMUP(num_threads)                                                \
+      do {                                                                     \
+            int _nt = (num_threads);                                           \
+            _Pragma("omp parallel num_threads(_nt)") {                         \
+                  _Pragma("omp for schedule(guided)") for (int _j = 0;         \
+                                                           _j < 1000000;       \
+                                                           ++_j) {             \
+                        volatile double _sink = _j * 0.5;                      \
+                  }                                                            \
+            }                                                                  \
+      } while (0)
 
 typedef struct benchmark_result {
       double duration_ms;
@@ -55,6 +68,9 @@ int validation_vec_result(const vec expected, const vec res);
 inline double now(void) { return (double)clock() * 1e3 / CLOCKS_PER_SEC; }
 
 inline double compute_gflops(double duration, int nnz) {
+      if (duration <= 0.0) {
+            return 0.0;
+      }
       return (2.0 * nnz) / (duration * 1e6);
 }
 

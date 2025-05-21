@@ -208,7 +208,7 @@ static void spmv_cuda_down(double *y, int M, ellpack_block *d_blocks,
 // storage)
 // -------------------------------------------------------
 double hll_spmv_cuda_threads_row_major(const sparse_hll *H, const double *x,
-                                       double *y) {
+                                       double *y, void *_unused) {
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
@@ -239,7 +239,7 @@ double hll_spmv_cuda_threads_row_major(const sparse_hll *H, const double *x,
 // storage -> acccesses are coalesced)
 // -------------------------------------------------------
 double hll_spmv_cuda_threads_col_major(const sparse_hll *H, const double *x,
-                                       double *y) {
+                                       double *y, void *_unused) {
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
@@ -268,8 +268,8 @@ double hll_spmv_cuda_threads_col_major(const sparse_hll *H, const double *x,
 // -----------------------------------------------------------------------------
 // Host 3: Each warp is assigned to an ellpack block
 // -------------------------------------------------------
-double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x,
-                                double *y) {
+double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x, double *y,
+                                void *_unused) {
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
@@ -299,7 +299,7 @@ double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x,
 // Host 3: Each half-warp is assigned to a row (uses row-major for coalesced)
 // -------------------------------------------------------
 double hll_spmv_cuda_halfwarp_row(const sparse_hll *H, const double *x,
-                                  double *y) {
+                                  double *y, void *_unused) {
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;

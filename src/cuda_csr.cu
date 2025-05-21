@@ -207,8 +207,8 @@ static void spmv_cuda_down(double *y, int M, int *d_IRP, int *d_JA,
 // -----------------------------------------------------------------------------
 // Host 1: thread‐per‐row
 // -------------------------------------------------------
-double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x,
-                                double *y) {
+double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x, double *y,
+                                void *_unused) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;
@@ -236,7 +236,8 @@ double csr_spmv_cuda_thread_row(const sparse_csr *A, const double *x,
 // -----------------------------------------------------------------------------
 // Host 2: warp‐per‐row
 // ---------------------------------------------------------
-double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y) {
+double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y,
+                              void *_unused) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;
@@ -265,7 +266,7 @@ double csr_spmv_cuda_warp_row(const sparse_csr *A, const double *x, double *y) {
 // Host 3: half-warp‐per‐row
 // ---------------------------------------------------------
 double csr_spmv_cuda_halfwarp_row(const sparse_csr *A, const double *x,
-                                  double *y) {
+                                  double *y, void *_unused) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;
@@ -293,8 +294,8 @@ double csr_spmv_cuda_halfwarp_row(const sparse_csr *A, const double *x,
 // -----------------------------------------------------------------------------
 // Host 4: block‐per‐row: multiple warps of the same block access the same row
 // ---------------------------------------------------------
-double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x,
-                               double *y) {
+double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x, double *y,
+                               void *_unused) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;
@@ -326,7 +327,7 @@ double csr_spmv_cuda_block_row(const sparse_csr *A, const double *x,
 // Host 5: half-warp‐per‐row: exploits texture cache for x
 // ---------------------------------------------------------
 double csr_spmv_cuda_halfwarp_row_text(const sparse_csr *A, const double *x,
-                                       double *y) {
+                                       double *y, void *_unused) {
       // Memory setup
       int *d_IRP, *d_JA;
       double *d_AS, *d_x, *d_y;

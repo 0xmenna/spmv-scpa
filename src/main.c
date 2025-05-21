@@ -170,6 +170,8 @@ static void run_csr_omp_benchmarks(csr_bench_fn bench_fn) {
       };
 
       for (int i = 0; i < ARRAY_SIZE(benchmarks); i++) {
+
+            OMP_WARMUP(benchmarks[i].num_threads);
             int ret = bench_fn(A, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[CSR OMP] failed with error %d", ret);
@@ -212,6 +214,7 @@ static void run_hll_omp_benchmarks(void) {
 
       for (int i = 0; i < ARRAY_SIZE(benchmarks); i++) {
 
+            OMP_WARMUP(benchmarks[i].num_threads);
             int ret = bench_hll_omp(H_row_major, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[HLL OMP] failed with error %d", ret);
@@ -345,16 +348,19 @@ err:
 
 static inline void run_benchmarks(void) {
 
+      // Serial benchmarks
       run_csr_serial_benchmark();
 
       run_hll_serial_benchmark();
 
+      // OpenMP benchmarks
       run_csr_omp_nnz_balancing_benchmarks();
 
       run_csr_omp_guided_benchmarks();
 
       run_hll_omp_benchmarks();
 
+      // CUDA benchmarks
       run_csr_cuda_benchmarks();
 
       run_hll_cuda_benchmarks();
