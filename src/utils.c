@@ -13,7 +13,8 @@ void log_prog_usage(const char *prog) {
           "Usage: %s -m <matrix-file.mtx> -o <out-dir> [-d] [-h]"
           "  -m, --matrix <file>   Path to the Matrix Market file to process"
           "  -o, --out <file>      Path where benchmark csv files will be saved"
-          "  -d, --debug           Validate results against serial implementation"
+          "  -d, --debug           Validate results against serial "
+          "implementation"
           "  -h, --help            Show this help message and exit",
           prog);
 }

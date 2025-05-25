@@ -54,4 +54,4 @@ dkms.conf
 # Project related
 build/
 res/matrices/
-res/*.csv
+res/benchmarks/*.csv

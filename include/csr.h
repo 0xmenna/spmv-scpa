@@ -31,15 +31,21 @@ sparse_csr *io_load_csr(const char *path);
 /** Free a SparseCSR */
 void csr_free(sparse_csr *A);
 
-int bench_csr_serial(const sparse_csr *A, bench *out);
+int bench_csr_serial(const sparse_csr *A, const double *x, bench *out);
 
-int bench_csr_omp_guided(const sparse_csr *A, bench_omp *out);
-int bench_csr_omp_nnz_balancing(const sparse_csr *A, bench_omp *out);
+int bench_csr_omp_guided(const sparse_csr *A, const double *x, bench_omp *out);
+int bench_csr_omp_nnz_balancing(const sparse_csr *A, const double *x,
+                                bench_omp *out);
 
-int bench_csr_cuda_thread_row(const sparse_csr *A, bench_cuda *out);
-int bench_csr_cuda_warp_row(const sparse_csr *A, bench_cuda *out);
-int bench_csr_cuda_halfwarp_row(const sparse_csr *A, bench_cuda *out);
-int bench_csr_cuda_block_row(const sparse_csr *A, bench_cuda *out);
-int bench_csr_cuda_halfwarp_row_text(const sparse_csr *A, bench_cuda *out);
+int bench_csr_cuda_thread_row(const sparse_csr *A, const double *x,
+                              bench_cuda *out);
+int bench_csr_cuda_warp_row(const sparse_csr *A, const double *x,
+                            bench_cuda *out);
+int bench_csr_cuda_halfwarp_row(const sparse_csr *A, const double *x,
+                                bench_cuda *out);
+int bench_csr_cuda_block_row(const sparse_csr *A, const double *x,
+                             bench_cuda *out);
+int bench_csr_cuda_halfwarp_row_text(const sparse_csr *A, const double *x,
+                                     bench_cuda *out);
 
 #endif /* SPARSE_CSR_H */
