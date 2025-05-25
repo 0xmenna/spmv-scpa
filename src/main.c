@@ -18,6 +18,7 @@ static bool is_logger_open = false;
 static sparse_csr *A = NULL;
 static sparse_hll *H_row_major = NULL;
 static sparse_hll *H_col_major = NULL;
+static vec x = {0};
 
 static vec expected_res = {0};
 
@@ -93,6 +94,13 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
       }
 
+      x = vec_create(A->N);
+      if (!x.data) {
+            cleanup();
+            return EXIT_FAILURE;
+      }
+      vec_fill_random(&x);
+
       run_benchmarks();
 
       cleanup();
@@ -107,6 +115,8 @@ static void cleanup(void) {
             hll_free(H_col_major);
       if (H_row_major)
             hll_free(H_row_major);
+      if (x.data)
+            vec_put(&x);
       if (A)
             csr_free(A);
       if (is_logger_open)
@@ -117,7 +127,7 @@ static void run_csr_serial_benchmark(void) {
       bench res;
       int ret;
 
-      ret = bench_csr_serial(A, &res);
+      ret = bench_csr_serial(A, x.data, &res);
       if (ret) {
             LOG_ERR("[CSR serial] failed with error %d", ret);
             cleanup();
@@ -137,7 +147,7 @@ static void run_csr_serial_benchmark(void) {
 
 static void run_hll_serial_benchmark(void) {
       bench res;
-      int ret = bench_hll_serial(H_row_major, &res);
+      int ret = bench_hll_serial(H_row_major, x.data, &res);
       if (ret) {
             LOG_ERR("[HLL serial] failed with error %d", ret);
             cleanup();
@@ -161,7 +171,7 @@ static void run_hll_serial_benchmark(void) {
       vec_put(&res.data);
 }
 
-typedef int (*csr_bench_fn)(const sparse_csr *, bench_omp *);
+typedef int (*csr_bench_fn)(const sparse_csr *, const double *, bench_omp *);
 
 static void run_csr_omp_benchmarks(csr_bench_fn bench_fn) {
       bench_omp benchmarks[] = {
@@ -172,7 +182,7 @@ static void run_csr_omp_benchmarks(csr_bench_fn bench_fn) {
       for (int i = 0; i < ARRAY_SIZE(benchmarks); i++) {
 
             OMP_WARMUP(benchmarks[i].num_threads);
-            int ret = bench_fn(A, &benchmarks[i]);
+            int ret = bench_fn(A, x.data, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[CSR OMP] failed with error %d", ret);
                   cleanup();
@@ -215,7 +225,7 @@ static void run_hll_omp_benchmarks(void) {
       for (int i = 0; i < ARRAY_SIZE(benchmarks); i++) {
 
             OMP_WARMUP(benchmarks[i].num_threads);
-            int ret = bench_hll_omp(H_row_major, &benchmarks[i]);
+            int ret = bench_hll_omp(H_row_major, x.data, &benchmarks[i]);
             if (ret) {
                   LOG_ERR("[HLL OMP] failed with error %d", ret);
                   cleanup();
@@ -242,7 +252,8 @@ static void run_hll_omp_benchmarks(void) {
       }
 }
 
-typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, bench_cuda *out);
+typedef int (*csr_cuda_bench_fn)(const sparse_csr *A, const double *,
+                                 bench_cuda *out);
 
 static inline void run_csr_cuda_benchmarks(void) {
       csr_cuda_bench_fn kernels[] = {
@@ -260,7 +271,7 @@ static inline void run_csr_cuda_benchmarks(void) {
       for (int kid = 0; kid < ARRAY_SIZE(kernels); ++kid) {
             for (int i = 0; i < ARRAY_SIZE(benchmarks); ++i) {
 
-                  int ret = kernels[kid](A, &benchmarks[i]);
+                  int ret = kernels[kid](A, x.data, &benchmarks[i]);
                   if (ret) {
                         LOG_ERR(
                             "Failed CSR CUDA [kernel %d, warps_per_block %d]",
@@ -292,7 +303,8 @@ err:
       exit(EXIT_FAILURE);
 }
 
-typedef int (*hll_cuda_bench_fn)(const sparse_hll *H, bench_cuda *out);
+typedef int (*hll_cuda_bench_fn)(const sparse_hll *H, const double *x,
+                                 bench_cuda *out);
 
 static inline void run_hll_cuda_benchmarks(void) {
       hll_cuda_bench_fn kernels[] = {
@@ -314,7 +326,7 @@ static inline void run_hll_cuda_benchmarks(void) {
 
             for (int i = 0; i < ARRAY_SIZE(benchmarks); ++i) {
 
-                  int ret = kernels[kid](H, &benchmarks[i]);
+                  int ret = kernels[kid](H, x.data, &benchmarks[i]);
                   if (ret) {
                         LOG_ERR(
                             "Failed HLL CUDA [kernel %d, warps_per_block %d]",

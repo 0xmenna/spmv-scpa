@@ -105,25 +105,17 @@ void hll_free(sparse_hll *H) {
       free(H);
 }
 
-static int compute_benchmark_hll(const sparse_hll *H, bench *out, void *add_arg,
+static int compute_benchmark_hll(const sparse_hll *H, const double *x,
+                                 bench *out, void *add_arg,
                                  double (*spmv_f)(const sparse_hll *H,
                                                   const double *x, double *y,
                                                   void *add_arg)) {
-      vec x = vec_create(H->N);
-      if (!x.data)
-            return -ENOMEM;
-
-      vec_fill_random(&x);
 
       vec y = vec_create(H->M);
-      if (!y.data) {
-            vec_put(&x);
+      if (!y.data)
             return -ENOMEM;
-      }
 
-      double duration = spmv_f(H, x.data, y.data, add_arg);
-
-      vec_put(&x);
+      double duration = spmv_f(H, x, y.data, add_arg);
 
       out->duration_ms = duration;
       out->gflops = compute_gflops(duration, H->NZ);
@@ -219,44 +211,46 @@ static inline double hll_spmv_omp(const sparse_hll *restrict H,
 }
 
 // Run HLL SpMV serial benchmark
-inline int bench_hll_serial(const sparse_hll *H, bench *out) {
-      return compute_benchmark_hll(H, out, NULL, hll_spmv_serial);
+inline int bench_hll_serial(const sparse_hll *H, const double *x, bench *out) {
+      return compute_benchmark_hll(H, x, out, NULL, hll_spmv_serial);
 }
 
-inline int bench_hll_omp(const sparse_hll *H, bench_omp *out) {
+inline int bench_hll_omp(const sparse_hll *H, const double *x, bench_omp *out) {
 
       snprintf(out->name, sizeof(out->name), "omp_guided");
 
-      return compute_benchmark_hll(H, &out->bench, &out->num_threads,
+      return compute_benchmark_hll(H, x, &out->bench, &out->num_threads,
                                    hll_spmv_omp);
 }
 
 inline int bench_hll_cuda_threads_row_major(const sparse_hll *H,
-                                            bench_cuda *out) {
+                                            const double *x, bench_cuda *out) {
       set_hll_warps_per_block(out->warps_per_block);
 
-      return compute_benchmark_hll(H, &out->bench, NULL,
+      return compute_benchmark_hll(H, x, &out->bench, NULL,
                                    hll_spmv_cuda_threads_row_major);
 }
 
 inline int bench_hll_cuda_threads_col_major(const sparse_hll *H,
-                                            bench_cuda *out) {
+                                            const double *x, bench_cuda *out) {
       set_hll_warps_per_block(out->warps_per_block);
 
-      return compute_benchmark_hll(H, &out->bench, NULL,
+      return compute_benchmark_hll(H, x, &out->bench, NULL,
                                    hll_spmv_cuda_threads_col_major);
 }
 
-inline int bench_hll_cuda_warp_block(const sparse_hll *H, bench_cuda *out) {
+inline int bench_hll_cuda_warp_block(const sparse_hll *H, const double *x,
+                                     bench_cuda *out) {
       set_hll_warps_per_block(out->warps_per_block);
 
-      return compute_benchmark_hll(H, &out->bench, NULL,
+      return compute_benchmark_hll(H, x, &out->bench, NULL,
                                    hll_spmv_cuda_warp_block);
 }
 
-inline int bench_hll_cuda_halfwarp_row(const sparse_hll *H, bench_cuda *out) {
+inline int bench_hll_cuda_halfwarp_row(const sparse_hll *H, const double *x,
+                                       bench_cuda *out) {
       set_hll_warps_per_block(out->warps_per_block);
 
-      return compute_benchmark_hll(H, &out->bench, NULL,
+      return compute_benchmark_hll(H, x, &out->bench, NULL,
                                    hll_spmv_cuda_halfwarp_row);
 }

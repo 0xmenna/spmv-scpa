@@ -36,8 +36,7 @@ __global__ static void spmv_kernel_0(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = off + j;
             int col = blk.JA[idx];
-            if (col != -1)
-                  sum += blk.AS[idx] * x[col];
+            sum += blk.AS[idx] * x[col];
       }
 
       y[tid] = sum;
@@ -66,8 +65,7 @@ __global__ static void spmv_kernel_1(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = j * blk.M + row_in_block;
             int col = blk.JA[idx];
-            if (col != -1)
-                  sum += blk.AS[idx] * x[col];
+            sum += blk.AS[idx] * x[col];
       }
 
       y[tid] = sum;
@@ -99,8 +97,7 @@ __global__ static void spmv_kernel_2(int M, int hack_size,
       for (int j = 0; j < blk.max_NZ; ++j) {
             int idx = j * blk.M + lane;
             int col = blk.JA[idx];
-            if (col != -1)
-                  sum += blk.AS[idx] * __ldg(&x[col]);
+            sum += blk.AS[idx] * __ldg(&x[col]);
       }
 
       y[warp_id * hack_size + lane] = sum;
@@ -141,8 +138,7 @@ __global__ static void spmv_kernel_3(int M, int hack_size,
       for (int j = half_lane; j < blk.max_NZ; j += 16) {
             int idx = off + j;
             int col = blk.JA[idx];
-            if (col != -1)
-                  sum += blk.AS[idx] * __ldg(&x[col]);
+            sum += blk.AS[idx] * __ldg(&x[col]);
       }
 
       // Reduction across half-warp
@@ -156,7 +152,8 @@ __global__ static void spmv_kernel_3(int M, int hack_size,
 }
 
 static void spmv_cuda_up(const sparse_hll *H, const double *x,
-                         ellpack_block **d_blocks, double **d_x, double **d_y) {
+                         ellpack_block **d_blocks, double **d_x, double **d_y,
+                         int is_col_major) {
       int M = H->M, N = H->N, B = H->num_blocks;
 
       cudaMalloc(d_blocks, B * sizeof(ellpack_block));
@@ -169,10 +166,38 @@ static void spmv_cuda_up(const sparse_hll *H, const double *x,
 
             int total_len = src->M * src->max_NZ;
 
+            // Allocate device memory
             cudaMalloc(&tmp.JA, total_len * sizeof(int));
             cudaMalloc(&tmp.AS, total_len * sizeof(double));
-            cudaMemcpy(tmp.JA, src->JA, total_len * sizeof(int),
+
+            // Host-side fix for changing in JA -1 to the last valid
+            // column index in each row. This is necessary for most kernels to
+            // avoid divergence in warp threads.
+            int *host_JA = (int *)malloc(total_len * sizeof(int));
+            memcpy(host_JA, src->JA, total_len * sizeof(int));
+
+            for (int row = 0; row < src->M; ++row) {
+                  for (int j = 0; j < src->max_NZ; ++j) {
+                        int idx = is_col_major ? j * src->M + row
+                                               : row * src->max_NZ + j;
+                        if (host_JA[idx] == -1) {
+                              if (j > 0) {
+                                    host_JA[idx] =
+                                        is_col_major
+                                            ? host_JA[(j - 1) * src->M + row]
+                                            : host_JA[idx - 1];
+                              } else {
+                                    host_JA[idx] =
+                                        0; // fallback for first element
+                              }
+                        }
+                  }
+            }
+
+            cudaMemcpy(tmp.JA, host_JA, total_len * sizeof(int),
                        cudaMemcpyHostToDevice);
+            free(host_JA);
+
             cudaMemcpy(tmp.AS, src->AS, total_len * sizeof(double),
                        cudaMemcpyHostToDevice);
 
@@ -212,7 +237,7 @@ double hll_spmv_cuda_threads_row_major(const sparse_hll *H, const double *x,
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
-      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y);
+      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y, false);
 
       cuda_timer timer;
       timer_init(&timer);
@@ -243,7 +268,7 @@ double hll_spmv_cuda_threads_col_major(const sparse_hll *H, const double *x,
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
-      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y);
+      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y, true);
 
       cuda_timer timer;
       timer_init(&timer);
@@ -273,7 +298,7 @@ double hll_spmv_cuda_warp_block(const sparse_hll *H, const double *x, double *y,
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
-      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y);
+      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y, true);
 
       cuda_timer timer;
       timer_init(&timer);
@@ -303,7 +328,7 @@ double hll_spmv_cuda_halfwarp_row(const sparse_hll *H, const double *x,
       // Memory setup
       ellpack_block *d_blocks;
       double *d_x, *d_y;
-      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y);
+      spmv_cuda_up(H, x, &d_blocks, &d_x, &d_y, false);
 
       cuda_timer timer;
       timer_init(&timer);
