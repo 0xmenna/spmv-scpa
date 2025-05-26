@@ -114,35 +114,6 @@ def plot_cuda(input_dir, output_dir):
             plt.close(fig)
             print(f"Saved plot: {out_file}")
 
-    # Scaling plot for single best-performing matrix
-    for fmt in df_agg['format'].unique():
-        df_fmt = df_agg[df_agg['format'] == fmt]
-        if df_fmt.empty:
-            continue
-        # pick the matrix with highest GFLOPS overall
-        best_matrix = df_fmt.loc[df_fmt['gflops'].idxmax()]['matrix']
-        df_best = df_fmt[df_fmt['matrix'] == best_matrix]
-
-        out_dir = os.path.join(output_dir, 'cuda', fmt, bench)
-        os.makedirs(out_dir, exist_ok=True)
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        for kernel in df_best['kernel'].unique():
-            df_k = df_best[df_best['kernel'] == kernel]
-            ax.plot(df_k['warps_per_block'], df_k['gflops'], marker='o', label=kernel)
-        ax.set_xscale('linear')
-        ax.set_yscale('log')
-        ax.set_xlabel('Warps per Block')
-        ax.set_ylabel('GFLOPS (log scale)')
-        ax.set_title(f'CUDA Scaling — {fmt} (best: {best_matrix})')
-        ax.legend(title='Kernel', bbox_to_anchor=(1, 1))
-        plt.tight_layout()
-
-        out_file = os.path.join(out_dir, f"cuda_{fmt.lower()}_{best_matrix}_scaling.png")
-        fig.savefig(out_file)
-        plt.close(fig)
-        print(f"Saved plot: {out_file}")
-
     # Best CSR vs HLL comparison across formats
     out_dir = os.path.join(output_dir, 'cuda', 'all', bench)
     os.makedirs(out_dir, exist_ok=True)
@@ -163,6 +134,54 @@ def plot_cuda(input_dir, output_dir):
     fig.savefig(out_file)
     plt.close(fig)
     print(f"Saved plot: {out_file}")
+
+
+def plot_cuda_per_bin(input_dir, output_dir):
+    cuda_csv = os.path.join(input_dir, 'cuda.csv')
+    if not os.path.isfile(cuda_csv):
+        raise FileNotFoundError(f"cuda.csv not found in {input_dir}")
+    df = pd.read_csv(cuda_csv)
+
+    # Considera solo warps_per_block 2, 4, 8
+    df = df[df['warps_per_block'].isin([2, 4, 8])]
+
+    # Binning per NNZ
+    bins = [0, 10_000, 100_000, 500_000, 1_000_000, 2_500_000, 10_000_000, float('inf')]
+    labels = ['<10K', '10K–100K', '100K–500K', '500K–1M', '1M–2.5M', '2.5M–10M', '≥10M']
+    df['zero_bin'] = pd.cut(df['nnz'], bins=bins, labels=labels, right=False)
+
+    bench = 'spmv'
+
+    for kernel in df['kernel'].unique():
+        df_kernel = df[df['kernel'] == kernel]
+
+        for fmt in df_kernel['format'].unique():
+            df_fmt = df_kernel[df_kernel['format'] == fmt]
+            out_dir = os.path.join(output_dir, 'cuda', 'by_kernel', str(kernel), fmt, bench)
+            os.makedirs(out_dir, exist_ok=True)
+
+            grouped = df_fmt.groupby(['zero_bin', 'warps_per_block'])['gflops'].mean().reset_index()
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            for label in labels:
+                df_zb = grouped[grouped['zero_bin'] == label]
+                if df_zb.empty:
+                    continue
+                df_zb = df_zb.sort_values('warps_per_block')
+                ax.plot(df_zb['warps_per_block'], df_zb['gflops'], marker='o', label=label)
+
+            ax.set_xlabel('Warps per Block')
+            ax.set_ylabel('GFLOPS')
+            ax.set_title(f'CUDA Avg GFLOPS vs Warps per Block — Kernel: {kernel}, Format: {fmt}')
+            ax.set_xticks([2, 4, 8])
+            ax.legend(title='NNZ Bin', bbox_to_anchor=(1, 1))
+            plt.tight_layout()
+
+            out_file = os.path.join(out_dir, f"{str(kernel)}_{fmt}_avg_gflops_by_zeros.png")
+            fig.savefig(out_file)
+            plt.close(fig)
+            print(f"Saved plot: {out_file}")
+
 
 
 def plot_openmp(input_dir, output_dir):
@@ -267,8 +286,9 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     plot_serial(args.bench_dir, args.out)
-    plot_cuda(args.bench_dir, args.out)
     plot_openmp(args.bench_dir, args.out)
+    plot_cuda(args.bench_dir, args.out)
+    plot_cuda_per_bin(args.bench_dir, args.out)
 
 if __name__ == '__main__':
     main()
